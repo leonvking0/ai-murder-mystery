@@ -1,6 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { ModelMessage } from 'ai';
 import type { Character, CharacterMemory, ChatMessage, GamePhase } from '@/types/game';
 import { buildNPCSystemPrompt } from '@/lib/agents/prompts/npc-base';
+import { isLLMConfigured, streamChat } from '@/lib/agents/llm-provider';
 
 interface StreamNPCResponseParams {
   character: Character;
@@ -26,11 +27,7 @@ interface StreamNPCGroupResponseParams {
   playerMessage: string;
 }
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
-function mapHistoryToClaudeMessages(conversationHistory: ChatMessage[]): Array<{ role: 'user' | 'assistant'; content: string }> {
+function mapHistoryToModelMessages(conversationHistory: ChatMessage[]): ModelMessage[] {
   return conversationHistory
     .filter(message => message.role === 'player' || message.role === 'npc')
     .map(message => {
@@ -59,38 +56,30 @@ export async function* streamNPCResponse(
     playerMessage,
   } = params;
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured()) {
     yield '我现在有些头绪混乱，晚点再和你细聊。';
     return;
   }
 
   try {
     const systemPrompt = buildNPCSystemPrompt(character, memory, gameState);
-    const historyMessages = mapHistoryToClaudeMessages(conversationHistory);
+    const historyMessages = mapHistoryToModelMessages(conversationHistory);
 
-    const stream = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 500,
-      temperature: 0.8,
+    const stream = streamChat({
       system: systemPrompt,
-      stream: true,
+      maxOutputTokens: 500,
+      temperature: 0.8,
       messages: [
         ...historyMessages,
         {
-          role: 'user',
+          role: 'user' as const,
           content: playerMessage,
         },
       ],
     });
 
-    for await (const event of stream) {
-      if (event.type !== 'content_block_delta') {
-        continue;
-      }
-
-      if (event.delta.type === 'text_delta') {
-        yield event.delta.text;
-      }
+    for await (const chunk of stream) {
+      yield chunk;
     }
   } catch (error) {
     console.error('NPC agent stream failed:', error);
@@ -109,7 +98,7 @@ export async function* streamNPCGroupResponse(
     playerMessage,
   } = params;
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured()) {
     yield '我先记下这个点，我们继续往时间线里对。';
     return;
   }
@@ -117,28 +106,20 @@ export async function* streamNPCGroupResponse(
   try {
     const systemPrompt = buildNPCSystemPrompt(character, memory, gameState);
 
-    const stream = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 450,
-      temperature: 0.8,
+    const stream = streamChat({
       system: systemPrompt,
-      stream: true,
+      maxOutputTokens: 450,
+      temperature: 0.8,
       messages: [
         {
-          role: 'user',
+          role: 'user' as const,
           content: `以下是当前群聊公开记录：\n${groupContext || '（暂无）'}\n\n请你用角色口吻回应：${playerMessage}\n要求：1-3句话，简洁自然，不跳出角色。`,
         },
       ],
     });
 
-    for await (const event of stream) {
-      if (event.type !== 'content_block_delta') {
-        continue;
-      }
-
-      if (event.delta.type === 'text_delta') {
-        yield event.delta.text;
-      }
+    for await (const chunk of stream) {
+      yield chunk;
     }
   } catch (error) {
     console.error('NPC group stream failed:', error);

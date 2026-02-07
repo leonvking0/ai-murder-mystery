@@ -1,9 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Character, CharacterMemory, Clue, SuspicionRecord } from '@/types/game';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+import { isLLMConfigured, streamChat } from '@/lib/agents/llm-provider';
 
 interface ConversationEntry {
   role: 'player' | 'npc' | 'gm' | 'system';
@@ -60,7 +56,7 @@ export async function summarizeConversations(memory: CharacterMemory): Promise<s
     return transcript;
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured()) {
     return memory.conversations
       .slice(-6)
       .map(item => item.summary)
@@ -68,11 +64,10 @@ export async function summarizeConversations(memory: CharacterMemory): Promise<s
   }
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 300,
-      temperature: 0.2,
+    const responseStream = streamChat({
       system: '你是剧本杀NPC记忆整理助手。请把对话压缩成不超过120字的中文摘要，保留关键人物、线索和矛盾点。',
+      maxOutputTokens: 300,
+      temperature: 0.2,
       messages: [
         {
           role: 'user',
@@ -81,13 +76,13 @@ export async function summarizeConversations(memory: CharacterMemory): Promise<s
       ],
     });
 
-    const text = response.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('')
-      .trim();
+    let summary = '';
+    for await (const chunk of responseStream) {
+      summary += chunk;
+    }
 
-    return text || memory.conversations.slice(-6).map(item => item.summary).join('；');
+    const normalized = summary.trim();
+    return normalized || memory.conversations.slice(-6).map(item => item.summary).join('；');
   } catch (error) {
     console.error('Conversation summary failed:', error);
     return memory.conversations.slice(-6).map(item => item.summary).join('；');

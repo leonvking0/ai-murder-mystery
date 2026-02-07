@@ -1,6 +1,7 @@
 import { PHASE_LABELS } from '@/lib/game-engine/phase-manager';
+import { isLLMConfigured, streamChat } from '@/lib/agents/llm-provider';
 import { getScenarioById } from '@/lib/store/game-sessions';
-import type { GameSession } from '@/types/game';
+import type { GMResponse, GameSession } from '@/types/game';
 
 export const GM_SYSTEM_PROMPT_TEMPLATE = `你是这局剧本杀的主持人(GM)。
 
@@ -23,6 +24,83 @@ export const GM_SYSTEM_PROMPT_TEMPLATE = `你是这局剧本杀的主持人(GM)�
 
 ## 输出格式
 回复JSON: {"narration": "...", "action": "none|advance_phase|release_clue|prompt_npc", "target": "..."}`;
+
+function buildGMSystemPrompt(session: GameSession): string {
+  const scenario = getScenarioById(session.scenarioId);
+
+  if (!scenario) {
+    return GM_SYSTEM_PROMPT_TEMPLATE
+      .replace('{fullTruth}', '未找到剧本真相')
+      .replace('{allCharacters}', '未找到角色信息')
+      .replace('{gameState}', JSON.stringify({
+        phase: session.currentPhase,
+        round: session.round,
+        groupChatMessageCount: session.groupChatHistory.length,
+      }, null, 2));
+  }
+
+  const allCharacters = scenario.characters.map(character => ({
+    id: character.id,
+    name: character.name,
+    publicInfo: character.publicInfo,
+    objectives: character.objectives.map(item => item.description),
+  }));
+
+  const gameState = {
+    phase: session.currentPhase,
+    round: session.round,
+    discoveredClueCount: session.discoveredClues.length,
+    groupChatTail: session.groupChatHistory.slice(-8).map(item => ({
+      role: item.role,
+      characterId: item.characterId,
+      content: item.content,
+    })),
+    votes: session.votes,
+  };
+
+  return GM_SYSTEM_PROMPT_TEMPLATE
+    .replace('{fullTruth}', scenario.case.truth)
+    .replace('{allCharacters}', JSON.stringify(allCharacters, null, 2))
+    .replace('{gameState}', JSON.stringify(gameState, null, 2));
+}
+
+function fallbackGMResponse(session: GameSession): GMResponse {
+  return {
+    narration: generateNarration(session, 'discussion_stall'),
+    action: 'none',
+  };
+}
+
+export async function* streamGMResponse(
+  session: GameSession,
+  instruction: string,
+): AsyncIterable<string> {
+  if (!isLLMConfigured()) {
+    yield JSON.stringify(fallbackGMResponse(session));
+    return;
+  }
+
+  try {
+    const responseStream = streamChat({
+      system: buildGMSystemPrompt(session),
+      maxOutputTokens: 350,
+      temperature: 0.4,
+      messages: [
+        {
+          role: 'user',
+          content: instruction,
+        },
+      ],
+    });
+
+    for await (const chunk of responseStream) {
+      yield chunk;
+    }
+  } catch (error) {
+    console.error('GM stream failed:', error);
+    yield JSON.stringify(fallbackGMResponse(session));
+  }
+}
 
 function pickRecentlyQuietCharacters(session: GameSession, allCharacterIds: string[]): string[] {
   const recentNpcMessages = session.groupChatHistory

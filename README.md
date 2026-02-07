@@ -6,20 +6,28 @@ Web-based single-player murder mystery game where one player interacts with AI-c
 
 - Next.js App Router + TypeScript
 - Tailwind CSS + shadcn/ui
-- Claude API via `@anthropic-ai/sdk`
+- Vercel AI SDK (`ai`) with multi-provider support:
+  - Anthropic via `@ai-sdk/anthropic` (`claude-sonnet-4-5`)
+  - Google via `@ai-sdk/google` (`gemini-2.0-flash`)
 - Zustand client store
 - In-memory session store (current), SQLite dependency available in project
 - SSE streaming for chat responses
 
 ## Environment Variables
 
-Create `.env.local`:
+Copy `.env.local.example` to `.env.local`:
 
 ```bash
+LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_anthropic_api_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_api_key
 ```
 
-Without `ANTHROPIC_API_KEY`, NPC responses fall back to built-in safe placeholder lines so the game remains playable.
+Provider switching:
+- `LLM_PROVIDER=anthropic` uses Claude (`claude-sonnet-4-5`)
+- `LLM_PROVIDER=google` uses Gemini (`gemini-2.0-flash`)
+
+If the selected provider key is missing, NPC/GM responses fall back to built-in safe placeholder lines so the game remains playable.
 
 ## Run Locally
 
