@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -204,6 +204,9 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
                 ) : (
                   <div className="flex max-w-[88%] gap-3">
                     <Avatar className="mt-1 border border-slate-600">
+                      {character?.avatar ? (
+                        <AvatarImage src={character.avatar} alt={`${name}头像`} />
+                      ) : null}
                       <AvatarFallback className="bg-slate-700 text-xs text-slate-100">
                         {name.slice(0, 1)}
                       </AvatarFallback>
@@ -222,6 +225,12 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
             <div className="flex justify-start">
               <div className="flex max-w-[88%] gap-3">
                 <Avatar className="mt-1 border border-slate-600">
+                  {characterMap[streamingCharacterId]?.avatar ? (
+                    <AvatarImage
+                      src={characterMap[streamingCharacterId]?.avatar}
+                      alt={`${characterMap[streamingCharacterId]?.name ?? '角色'}头像`}
+                    />
+                  ) : null}
                   <AvatarFallback className="bg-slate-700 text-xs text-slate-100">
                     {(characterMap[streamingCharacterId]?.name ?? '角').slice(0, 1)}
                   </AvatarFallback>

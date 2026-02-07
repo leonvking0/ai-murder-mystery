@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { MessageBubble } from '@/components/game/MessageBubble';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -145,7 +146,13 @@ export function ChatPanel({ sessionId, character, disabled = false, disabledReas
     <div className="flex h-full flex-col rounded-2xl border border-slate-700/70 bg-slate-950/70 backdrop-blur">
       <div className="border-b border-slate-700/60 px-5 py-4">
         <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Private Chat</p>
-        <h2 className="mt-1 text-lg font-semibold text-amber-100">{character.name}</h2>
+        <div className="mt-2 flex items-center gap-2.5">
+          <Avatar className="border border-slate-600/80 bg-slate-800">
+            {character.avatar ? <AvatarImage src={character.avatar} alt={`${character.name}头像`} /> : null}
+            <AvatarFallback className="bg-transparent text-slate-100">{character.name.slice(0, 1)}</AvatarFallback>
+          </Avatar>
+          <h2 className="text-lg font-semibold text-amber-100">{character.name}</h2>
+        </div>
       </div>
 
       <ScrollArea className="h-0 flex-1 px-4 py-4">

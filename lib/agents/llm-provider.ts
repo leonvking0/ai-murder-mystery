@@ -6,7 +6,7 @@ export type LLMProvider = 'anthropic' | 'google';
 
 const DEFAULT_PROVIDER: LLMProvider = 'anthropic';
 const ANTHROPIC_MODEL = 'claude-sonnet-4-5';
-const GOOGLE_MODEL = 'gemini-2.0-flash';
+const GOOGLE_MODEL = 'gemini-3-flash-preview';
 
 interface StreamChatParams {
   system: string;

@@ -1,5 +1,8 @@
 'use client';
 
+import { useState } from 'react';
+import Image from 'next/image';
+
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { Character } from '@/types/game';
 
@@ -14,6 +17,10 @@ function initials(name: string): string {
 }
 
 export function CharacterCard({ character, selected, onClick }: CharacterCardProps) {
+  const [failedAvatarSrc, setFailedAvatarSrc] = useState<string | null>(null);
+  const avatarSrc = character.avatar;
+  const showAvatar = Boolean(avatarSrc) && failedAvatarSrc !== avatarSrc;
+
   return (
     <button
       type="button"
@@ -27,9 +34,20 @@ export function CharacterCard({ character, selected, onClick }: CharacterCardPro
     >
       <div className="flex items-start gap-3">
         <Avatar className="border border-slate-600/80 bg-slate-800" size="default">
-          <AvatarFallback className="bg-transparent text-slate-100">
-            {initials(character.name)}
-          </AvatarFallback>
+          {showAvatar && avatarSrc ? (
+            <Image
+              src={avatarSrc}
+              alt={`${character.name}头像`}
+              fill
+              sizes="40px"
+              className="object-cover"
+              onError={() => setFailedAvatarSrc(avatarSrc)}
+            />
+          ) : (
+            <AvatarFallback className="bg-transparent text-slate-100">
+              {initials(character.name)}
+            </AvatarFallback>
+          )}
         </Avatar>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">

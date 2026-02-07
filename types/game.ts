@@ -24,6 +24,12 @@ export interface ScenarioSetting {
   location: string;
   atmosphere: string;
   backgroundStory: string;
+  images?: {
+    exterior?: string;
+    crimeScene?: string;
+    livingRoom?: string;
+    diningHall?: string;
+  };
 }
 
 export interface CaseInfo {

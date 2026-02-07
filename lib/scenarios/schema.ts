@@ -98,6 +98,21 @@ function validateSetting(setting: unknown): void {
       throw new ScenarioValidationError(`Missing or invalid ${field}`, `setting.${field}`);
     }
   }
+
+  if (s.images !== undefined) {
+    if (!s.images || typeof s.images !== 'object' || Array.isArray(s.images)) {
+      throw new ScenarioValidationError('images must be an object', 'setting.images');
+    }
+
+    const images = s.images as Record<string, unknown>;
+    const optionalFields = ['exterior', 'crimeScene', 'livingRoom', 'diningHall'];
+
+    for (const field of optionalFields) {
+      if (images[field] !== undefined && typeof images[field] !== 'string') {
+        throw new ScenarioValidationError(`${field} must be a string`, `setting.images.${field}`);
+      }
+    }
+  }
 }
 
 function validateCase(caseInfo: unknown): void {
@@ -125,6 +140,10 @@ function validateCharacter(char: unknown, path: string): void {
     if (typeof c[field] !== 'string' || !c[field]) {
       throw new ScenarioValidationError(`Missing or invalid ${field}`, `${path}.${field}`);
     }
+  }
+
+  if (c.avatar !== undefined && typeof c.avatar !== 'string') {
+    throw new ScenarioValidationError('avatar must be a string', `${path}.avatar`);
   }
 
   // Age

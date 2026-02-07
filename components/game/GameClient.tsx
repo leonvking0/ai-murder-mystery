@@ -10,10 +10,11 @@ import { InvestigationPanel } from '@/components/game/InvestigationPanel';
 import { PhaseIndicator } from '@/components/game/PhaseIndicator';
 import { PhaseTransition } from '@/components/game/PhaseTransition';
 import { RevealPanel } from '@/components/game/RevealPanel';
+import { SceneImage } from '@/components/game/SceneImage';
 import { VotingPanel } from '@/components/game/VotingPanel';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { getNextPhase, getPhaseConfig } from '@/lib/game-engine/phase-manager';
+import { PHASE_LABELS, getNextPhase, getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { useGameStore } from '@/lib/store/game-store';
 import type {
   Clue,
@@ -30,6 +31,46 @@ interface GameClientProps {
 
 const PLAYER_VOTER_ID = 'player';
 const DEFAULT_KILLER_ID = 'wang-daming';
+
+interface PhaseScene {
+  src?: string;
+  title: string;
+  subtitle: string;
+}
+
+function resolvePhaseScene(scenario: Scenario, phase: GamePhase): PhaseScene {
+  const images = scenario.setting.images;
+
+  if (phase === 'DISCUSSION_1' || phase === 'DISCUSSION_2' || phase === 'FINAL_DISCUSSION') {
+    return {
+      src: images?.livingRoom,
+      title: '客厅讨论区',
+      subtitle: '火光摇曳的公共空间里，每一句口供都可能藏着新的矛盾。',
+    };
+  }
+
+  if (phase === 'INVESTIGATION_1' || phase === 'INVESTIGATION_2' || phase === 'VOTING' || phase === 'REVEAL') {
+    return {
+      src: images?.crimeScene,
+      title: '书房案发现场',
+      subtitle: '密室、毒酒与旧案线索在这里交汇，细节决定最终结论。',
+    };
+  }
+
+  if (phase === 'LOBBY') {
+    return {
+      src: images?.diningHall ?? images?.exterior,
+      title: '山庄大厅',
+      subtitle: '风雪封山，所有人被迫同席而坐，危险刚刚开始。',
+    };
+  }
+
+  return {
+    src: images?.exterior,
+    title: '山庄外景',
+    subtitle: '暴风雪吞没了归路，也将每个人的秘密困在同一栋宅邸中。',
+  };
+}
 
 export function GameClient({ sessionId }: GameClientProps) {
   const router = useRouter();
@@ -161,6 +202,11 @@ export function GameClient({ sessionId }: GameClientProps) {
 
     return scenario.characters.find(character => character.id === playerCharacterId) ?? null;
   }, [playerCharacterId, scenario]);
+
+  const phaseScene = useMemo(
+    () => (scenario ? resolvePhaseScene(scenario, gamePhase) : null),
+    [gamePhase, scenario],
+  );
 
   const canAdvancePhase = getNextPhase(gamePhase) !== null;
 
@@ -323,6 +369,17 @@ export function GameClient({ sessionId }: GameClientProps) {
             )}
           </div>
         </header>
+
+        {phaseScene && (
+          <SceneImage
+            src={phaseScene.src}
+            alt={phaseScene.title}
+            title={phaseScene.title}
+            subtitle={phaseScene.subtitle}
+            badge={`当前阶段 · ${PHASE_LABELS[gamePhase]}`}
+            className="mb-4"
+          />
+        )}
 
         <div className="grid min-h-[72vh] grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)_300px]">
           <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur lg:min-h-0">
