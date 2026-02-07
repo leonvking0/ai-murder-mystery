@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { CharacterCard } from '@/components/game/CharacterCard';
 import { ChatPanel } from '@/components/game/ChatPanel';
@@ -11,9 +12,17 @@ import { PhaseTransition } from '@/components/game/PhaseTransition';
 import { RevealPanel } from '@/components/game/RevealPanel';
 import { VotingPanel } from '@/components/game/VotingPanel';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { getNextPhase, getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { useGameStore } from '@/lib/store/game-store';
-import type { Clue, GamePhase, GameStateResponse, Scenario, VoteResponse } from '@/types/game';
+import type {
+  Clue,
+  CreateGameResponse,
+  GamePhase,
+  GameStateResponse,
+  Scenario,
+  VoteResponse,
+} from '@/types/game';
 
 interface GameClientProps {
   sessionId: string;
@@ -23,10 +32,13 @@ const PLAYER_VOTER_ID = 'player';
 const DEFAULT_KILLER_ID = 'wang-daming';
 
 export function GameClient({ sessionId }: GameClientProps) {
+  const router = useRouter();
   const [scenario, setScenario] = useState<Scenario | null>(null);
+  const [playerCharacterId, setPlayerCharacterId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [creatingNewGame, setCreatingNewGame] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [transitionOpen, setTransitionOpen] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState<GamePhase>('READING');
@@ -94,6 +106,7 @@ export function GameClient({ sessionId }: GameClientProps) {
         }
 
         setScenario(data.scenario);
+        setPlayerCharacterId(data.session.playerCharacterId ?? null);
         hydrateMessages(data.session.chatHistories);
         hydrateGroupMessages(data.session.groupChatHistory);
         setPhase(data.session.currentPhase);
@@ -141,7 +154,46 @@ export function GameClient({ sessionId }: GameClientProps) {
     return scenario.characters.find(character => character.id === selectedCharacterId) ?? null;
   }, [scenario, selectedCharacterId]);
 
+  const playerCharacter = useMemo(() => {
+    if (!scenario || !playerCharacterId) {
+      return null;
+    }
+
+    return scenario.characters.find(character => character.id === playerCharacterId) ?? null;
+  }, [playerCharacterId, scenario]);
+
   const canAdvancePhase = getNextPhase(gamePhase) !== null;
+
+  const startNewGame = async () => {
+    if (creatingNewGame || !scenario) {
+      return;
+    }
+
+    setCreatingNewGame(true);
+    setActionError(null);
+
+    try {
+      const response = await fetch('/api/game/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ scenarioId: scenario.id }),
+      });
+
+      const payload = (await response.json()) as CreateGameResponse & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? '创建新游戏失败');
+      }
+
+      router.push(`/game/${payload.sessionId}`);
+    } catch (createError) {
+      setActionError(createError instanceof Error ? createError.message : '创建新游戏失败');
+    } finally {
+      setCreatingNewGame(false);
+    }
+  };
 
   const advancePhase = async (): Promise<boolean> => {
     if (advancing || !canAdvancePhase) {
@@ -226,8 +278,21 @@ export function GameClient({ sessionId }: GameClientProps) {
     <main className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(180,83,9,0.16),transparent_42%),radial-gradient(circle_at_78%_18%,rgba(71,85,105,0.22),transparent_38%),linear-gradient(160deg,#020617,#0f172a_45%,#111827)] text-slate-100">
       <div className="mx-auto max-w-[1500px] px-4 py-4 lg:px-6 lg:py-6">
         <header className="mb-4 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
-          <p className="text-xs uppercase tracking-[0.26em] text-amber-300/90">AI Murder Mystery</p>
-          <h1 className="mt-2 text-2xl font-semibold text-amber-100">{scenario.title}</h1>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.26em] text-amber-300/90">AI Murder Mystery</p>
+              <h1 className="mt-2 text-2xl font-semibold text-amber-100">{scenario.title}</h1>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={startNewGame}
+              disabled={creatingNewGame}
+              className="bg-slate-200 text-slate-950 hover:bg-slate-300"
+            >
+              {creatingNewGame ? '创建新局中...' : 'New Game'}
+            </Button>
+          </div>
           <p className="mt-2 text-sm leading-relaxed text-slate-300">{scenario.description}</p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
             <span className="rounded-md border border-slate-600/70 bg-slate-900/70 px-2 py-1">
@@ -240,21 +305,45 @@ export function GameClient({ sessionId }: GameClientProps) {
               预计时长：{scenario.estimatedDuration} 分钟
             </span>
           </div>
+
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-xs uppercase tracking-[0.22em] text-amber-200/90">玩家身份</p>
+            {playerCharacter ? (
+              <div className="mt-2 space-y-1 text-sm text-amber-50/95">
+                <p className="font-semibold">
+                  你扮演 {playerCharacter.name}（{playerCharacter.age}岁，{playerCharacter.occupation}）
+                </p>
+                <p className="text-amber-50/90">性格：{playerCharacter.personality}</p>
+                <p className="leading-relaxed text-amber-50/90">公开信息：{playerCharacter.publicInfo}</p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm leading-relaxed text-amber-50/95">
+                你是一名被困在山庄的侦探，需要通过与其他宾客交谈、梳理线索并在投票阶段指出凶手。
+              </p>
+            )}
+          </div>
         </header>
 
-        <div className="grid min-h-[72vh] grid-cols-1 gap-4 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
-          <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Characters</p>
-            <div className="mt-4 space-y-2">
-              {scenario.characters.map(character => (
-                <CharacterCard
-                  key={character.id}
-                  character={character}
-                  selected={character.id === selectedCharacterId}
-                  onClick={() => selectCharacter(character.id)}
-                />
-              ))}
-            </div>
+        <div className="grid min-h-[72vh] grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)_300px]">
+          <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur lg:min-h-0">
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Characters / NPC档案</p>
+            <h2 className="mt-2 text-lg font-semibold text-amber-100">可对话角色</h2>
+            <p className="mt-2 text-xs leading-relaxed text-slate-400">
+              点击任意角色可切换私聊对象；每位角色均展示名字、年龄、职业、性格与公开信息。
+            </p>
+
+            <ScrollArea className="mt-4 h-[50vh] pr-2 lg:h-[calc(72vh-8rem)]">
+              <div className="space-y-2">
+                {scenario.characters.map(character => (
+                  <CharacterCard
+                    key={character.id}
+                    character={character}
+                    selected={character.id === selectedCharacterId}
+                    onClick={() => selectCharacter(character.id)}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
           </aside>
 
           <section className="flex min-h-[60vh] flex-col gap-4 lg:min-h-0">
