@@ -28,57 +28,62 @@ function getRoundForPhase(phase: GamePhase, currentRound: number): number {
 }
 
 export async function POST(_req: Request, context: RouteContext): Promise<Response> {
-  const { id } = await context.params;
+  try {
+    const { id } = await context.params;
 
-  const session = getSession(id);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
-  }
+    const session = getSession(id);
+    if (!session) {
+      return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
 
-  const scenario = getScenarioById(session.scenarioId);
-  if (!scenario) {
-    return Response.json({ error: 'Scenario not found' }, { status: 404 });
-  }
+    const scenario = getScenarioById(session.scenarioId);
+    if (!scenario) {
+      return Response.json({ error: 'Scenario not found' }, { status: 404 });
+    }
 
-  if (!canAdvance(session)) {
-    return Response.json(
-      { error: `Cannot advance from phase ${session.currentPhase}` },
-      { status: 400 },
-    );
-  }
+    if (!canAdvance(session)) {
+      return Response.json(
+        { error: `Cannot advance from phase ${session.currentPhase}` },
+        { status: 400 },
+      );
+    }
 
-  const nextPhase = getNextPhase(session.currentPhase);
-  if (!nextPhase) {
-    return Response.json({ error: 'No next phase available' }, { status: 400 });
-  }
+    const nextPhase = getNextPhase(session.currentPhase);
+    if (!nextPhase) {
+      return Response.json({ error: 'No next phase available' }, { status: 400 });
+    }
 
-  const nextSession = updateSession(id, current => ({
-    ...current,
-    currentPhase: nextPhase,
-    round: getRoundForPhase(nextPhase, current.round),
-  }));
+    const nextSession = updateSession(id, current => ({
+      ...current,
+      currentPhase: nextPhase,
+      round: getRoundForPhase(nextPhase, current.round),
+    }));
 
-  if (!nextSession) {
-    return Response.json({ error: 'Failed to update session' }, { status: 500 });
-  }
+    if (!nextSession) {
+      return Response.json({ error: 'Failed to update session' }, { status: 500 });
+    }
 
-  const response: GameStateResponse & {
-    transition: {
-      from: GamePhase;
-      to: GamePhase;
-      narration: string;
-      phaseConfig: ReturnType<typeof getPhaseConfig>;
+    const response: GameStateResponse & {
+      transition: {
+        from: GamePhase;
+        to: GamePhase;
+        narration: string;
+        phaseConfig: ReturnType<typeof getPhaseConfig>;
+      };
+    } = {
+      session: nextSession,
+      scenario,
+      transition: {
+        from: session.currentPhase,
+        to: nextPhase,
+        narration: PHASE_NARRATIONS[nextPhase],
+        phaseConfig: getPhaseConfig(nextPhase),
+      },
     };
-  } = {
-    session: nextSession,
-    scenario,
-    transition: {
-      from: session.currentPhase,
-      to: nextPhase,
-      narration: PHASE_NARRATIONS[nextPhase],
-      phaseConfig: getPhaseConfig(nextPhase),
-    },
-  };
 
-  return Response.json(response);
+    return Response.json(response);
+  } catch (error) {
+    console.error('Advance route failed:', error);
+    return Response.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

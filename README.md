@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Murder Mystery (剧本杀)
 
-## Getting Started
+Web-based single-player murder mystery game where one player interacts with AI-controlled NPCs and a GM-driven phase engine.
 
-First, run the development server:
+## Tech Stack
+
+- Next.js App Router + TypeScript
+- Tailwind CSS + shadcn/ui
+- Claude API via `@anthropic-ai/sdk`
+- Zustand client store
+- In-memory session store (current), SQLite dependency available in project
+- SSE streaming for chat responses
+
+## Environment Variables
+
+Create `.env.local`:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Without `ANTHROPIC_API_KEY`, NPC responses fall back to built-in safe placeholder lines so the game remains playable.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run Locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Open `http://localhost:3000`.
 
-To learn more about Next.js, take a look at the following resources:
+## Game Flow (10 Phases)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. `LOBBY`
+2. `READING`
+3. `INTRO`
+4. `DISCUSSION_1`
+5. `INVESTIGATION_1`
+6. `DISCUSSION_2`
+7. `INVESTIGATION_2`
+8. `FINAL_DISCUSSION`
+9. `VOTING`
+10. `REVEAL`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Current session starts at `READING`.
 
-## Deploy on Vercel
+## Core Gameplay Rules
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `READING` phase: chat is disabled.
+- Only `INVESTIGATION_1` and `INVESTIGATION_2` allow investigation.
+- `VOTING` phase accepts one player vote (`/api/game/[id]/vote`).
+- After vote submission, client auto-advances to `REVEAL`.
+- `REVEAL` shows correctness and full case truth.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## API Endpoints
+
+- `POST /api/game/create` - create new session
+- `GET /api/game/[id]/state` - get session + scenario
+- `POST /api/game/chat` - private chat SSE stream
+- `POST /api/game/[id]/group-chat` - group chat SSE stream
+- `POST /api/game/[id]/investigate` - investigate a location
+- `POST /api/game/[id]/vote` - submit final accusation
+- `POST /api/game/[id]/advance` - advance to next phase
+
+## Sprint 7/8 Features Included
+
+- Voting API and voting UI panel
+- Reveal panel with dramatic staged sequence
+- Auto transition from `VOTING` to `REVEAL` after vote
+- Unified async loading/error states across key panels
+- Route-level `try/catch` error handling added for all game API routes
+- Header now shows scenario title + description
+- Responsive panel layout with dark theme-compatible styling
+
+## Validation Performed
+
+- `npm run lint`
+- `npx tsc --noEmit`
+- Phase engine flow checks (10-phase order, phase capabilities, voting gate on advance)
+
+Note: Full localhost HTTP E2E could not be run in this sandbox because binding to local ports is restricted (`EPERM`).

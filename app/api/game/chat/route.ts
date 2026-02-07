@@ -19,150 +19,155 @@ function createSSEData(payload: unknown): string {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  let body: ChatRequest;
-
   try {
-    body = (await req.json()) as ChatRequest;
-  } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+    let body: ChatRequest;
 
-  const { sessionId, targetCharacterId, message } = body;
+    try {
+      body = (await req.json()) as ChatRequest;
+    } catch {
+      return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
 
-  if (!sessionId || !targetCharacterId || !message?.trim()) {
-    return Response.json(
-      { error: 'sessionId, targetCharacterId, and message are required' },
-      { status: 400 },
-    );
-  }
+    const { sessionId, targetCharacterId, message } = body;
 
-  const session = getSession(sessionId);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
-  }
+    if (!sessionId || !targetCharacterId || !message?.trim()) {
+      return Response.json(
+        { error: 'sessionId, targetCharacterId, and message are required' },
+        { status: 400 },
+      );
+    }
 
-  const scenario = getScenarioById(session.scenarioId);
-  if (!scenario) {
-    return Response.json({ error: 'Scenario not found' }, { status: 404 });
-  }
+    const session = getSession(sessionId);
+    if (!session) {
+      return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
 
-  if (!getPhaseConfig(session.currentPhase).allowsChat) {
-    return Response.json(
-      { error: `Chat is disabled during phase ${session.currentPhase}` },
-      { status: 403 },
-    );
-  }
+    const scenario = getScenarioById(session.scenarioId);
+    if (!scenario) {
+      return Response.json({ error: 'Scenario not found' }, { status: 404 });
+    }
 
-  const character = scenario.characters.find(item => item.id === targetCharacterId);
-  if (!character) {
-    return Response.json({ error: 'Character not found' }, { status: 404 });
-  }
+    if (!getPhaseConfig(session.currentPhase).allowsChat) {
+      return Response.json(
+        { error: `Chat is disabled during phase ${session.currentPhase}` },
+        { status: 403 },
+      );
+    }
 
-  const memory = session.characterMemories[targetCharacterId];
-  const history = session.chatHistories[targetCharacterId] ?? [];
+    const character = scenario.characters.find(item => item.id === targetCharacterId);
+    if (!character) {
+      return Response.json({ error: 'Character not found' }, { status: 404 });
+    }
 
-  if (!memory) {
-    return Response.json({ error: 'Character memory not found' }, { status: 404 });
-  }
+    const memory = session.characterMemories[targetCharacterId];
+    const history = session.chatHistories[targetCharacterId] ?? [];
 
-  const knownClues = [
-    ...memory.discoveredClues.map(clue => clue.content),
-    ...memory.knownFacts,
-  ];
+    if (!memory) {
+      return Response.json({ error: 'Character memory not found' }, { status: 404 });
+    }
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (payload: unknown) => {
-        controller.enqueue(encoder.encode(createSSEData(payload)));
-      };
+    const knownClues = [
+      ...memory.discoveredClues.map(clue => clue.content),
+      ...memory.knownFacts,
+    ];
 
-      let npcReply = '';
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (payload: unknown) => {
+          controller.enqueue(encoder.encode(createSSEData(payload)));
+        };
 
-      try {
-        send({ type: 'start' });
+        let npcReply = '';
 
-        const responseStream = streamNPCResponse({
-          character,
-          memory,
-          conversationHistory: history,
-          gameState: {
-            phase: session.currentPhase as GamePhase,
-            knownClues,
-            emotionalState: memory.emotionalState,
-          },
-          playerMessage: message,
-        });
+        try {
+          send({ type: 'start' });
 
-        for await (const chunk of responseStream) {
-          npcReply += chunk;
-          send({ type: 'chunk', text: chunk });
-        }
+          const responseStream = streamNPCResponse({
+            character,
+            memory,
+            conversationHistory: history,
+            gameState: {
+              phase: session.currentPhase as GamePhase,
+              knownClues,
+              emotionalState: memory.emotionalState,
+            },
+            playerMessage: message,
+          });
 
-        let nextMemory = appendConversation(memory, {
-          role: 'player',
-          content: message,
-          characterId: targetCharacterId,
-        });
+          for await (const chunk of responseStream) {
+            npcReply += chunk;
+            send({ type: 'chunk', text: chunk });
+          }
 
-        nextMemory = appendConversation(nextMemory, {
-          role: 'npc',
-          content: npcReply,
-          characterId: targetCharacterId,
-        });
+          let nextMemory = appendConversation(memory, {
+            role: 'player',
+            content: message,
+            characterId: targetCharacterId,
+          });
 
-        if (nextMemory.conversations.length > 10) {
-          const summary = await summarizeConversations(nextMemory);
-          nextMemory = {
-            ...nextMemory,
-            knownFacts: [...nextMemory.knownFacts, `近期对话摘要：${summary}`],
-            conversations: nextMemory.conversations.slice(-6),
+          nextMemory = appendConversation(nextMemory, {
+            role: 'npc',
+            content: npcReply,
+            characterId: targetCharacterId,
+          });
+
+          if (nextMemory.conversations.length > 10) {
+            const summary = await summarizeConversations(nextMemory);
+            nextMemory = {
+              ...nextMemory,
+              knownFacts: [...nextMemory.knownFacts, `近期对话摘要：${summary}`],
+              conversations: nextMemory.conversations.slice(-6),
+            };
+          }
+
+          const playerMessage: ChatMessage = {
+            id: randomUUID(),
+            role: 'player',
+            characterId: targetCharacterId,
+            content: message,
+            timestamp: Date.now(),
           };
+
+          const npcMessage: ChatMessage = {
+            id: randomUUID(),
+            role: 'npc',
+            characterId: targetCharacterId,
+            content: npcReply,
+            timestamp: Date.now(),
+          };
+
+          updateSession(sessionId, current => ({
+            ...current,
+            chatHistories: {
+              ...current.chatHistories,
+              [targetCharacterId]: [
+                ...(current.chatHistories[targetCharacterId] ?? []),
+                playerMessage,
+                npcMessage,
+              ],
+            },
+            characterMemories: {
+              ...current.characterMemories,
+              [targetCharacterId]: nextMemory,
+            },
+          }));
+
+          send({ type: 'done' });
+        } catch (error) {
+          console.error('Chat stream failed:', error);
+          send({ type: 'error', message: 'NPC response failed' });
+        } finally {
+          controller.close();
         }
+      },
+    });
 
-        const playerMessage: ChatMessage = {
-          id: randomUUID(),
-          role: 'player',
-          characterId: targetCharacterId,
-          content: message,
-          timestamp: Date.now(),
-        };
-
-        const npcMessage: ChatMessage = {
-          id: randomUUID(),
-          role: 'npc',
-          characterId: targetCharacterId,
-          content: npcReply,
-          timestamp: Date.now(),
-        };
-
-        updateSession(sessionId, current => ({
-          ...current,
-          chatHistories: {
-            ...current.chatHistories,
-            [targetCharacterId]: [
-              ...(current.chatHistories[targetCharacterId] ?? []),
-              playerMessage,
-              npcMessage,
-            ],
-          },
-          characterMemories: {
-            ...current.characterMemories,
-            [targetCharacterId]: nextMemory,
-          },
-        }));
-
-        send({ type: 'done' });
-      } catch (error) {
-        console.error('Chat stream failed:', error);
-        send({ type: 'error', message: 'NPC response failed' });
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: sseHeaders(),
-  });
+    return new Response(stream, {
+      headers: sseHeaders(),
+    });
+  } catch (error) {
+    console.error('Chat route failed:', error);
+    return Response.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

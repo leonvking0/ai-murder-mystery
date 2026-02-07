@@ -39,159 +39,165 @@ function createPlayerGroupMessage(content: string): ChatMessage {
 }
 
 export async function POST(req: Request, context: RouteContext): Promise<Response> {
-  const { id } = await context.params;
-
-  let body: GroupChatRequestBody;
-
   try {
-    body = (await req.json()) as GroupChatRequestBody;
-  } catch {
-    body = {};
-  }
+    const { id } = await context.params;
 
-  const session = getSession(id);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
-  }
+    let body: GroupChatRequestBody;
 
-  const scenario = getScenarioById(session.scenarioId);
-  if (!scenario) {
-    return Response.json({ error: 'Scenario not found' }, { status: 404 });
-  }
-
-  if (!isDiscussionPhase(session.currentPhase)) {
-    return Response.json(
-      { error: `Group chat is disabled during phase ${session.currentPhase}` },
-      { status: 403 },
-    );
-  }
-
-  const message = body.message?.trim() ?? '';
-  let workingSession = session;
-
-  if (message) {
-    const playerMessage = createPlayerGroupMessage(message);
-    const updated = updateSession(id, current => ({
-      ...current,
-      groupChatHistory: [...current.groupChatHistory, playerMessage],
-    }));
-
-    if (!updated) {
-      return Response.json({ error: 'Failed to update session' }, { status: 500 });
+    try {
+      body = (await req.json()) as GroupChatRequestBody;
+    } catch {
+      body = {};
     }
 
-    workingSession = updated;
-  }
+    const session = getSession(id);
+    if (!session) {
+      return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (payload: unknown) => {
-        controller.enqueue(encoder.encode(createSSEData(payload)));
-      };
+    const scenario = getScenarioById(session.scenarioId);
+    if (!scenario) {
+      return Response.json({ error: 'Scenario not found' }, { status: 404 });
+    }
 
-      let activeCharacterId: string | null = null;
-      const finalTexts = new Map<string, string>();
-      const responseOrder: string[] = [];
+    if (!isDiscussionPhase(session.currentPhase)) {
+      return Response.json(
+        { error: `Group chat is disabled during phase ${session.currentPhase}` },
+        { status: 403 },
+      );
+    }
 
-      try {
-        for await (const item of manageGroupResponse(workingSession, message)) {
-          if (item.characterId !== activeCharacterId) {
-            if (activeCharacterId) {
-              send({
-                type: 'npc_done',
-                characterId: activeCharacterId,
-                text: finalTexts.get(activeCharacterId) ?? '',
-              });
-            }
+    const message = body.message?.trim() ?? '';
+    let workingSession = session;
 
-            activeCharacterId = item.characterId;
-            responseOrder.push(item.characterId);
+    if (message) {
+      const playerMessage = createPlayerGroupMessage(message);
+      const updated = updateSession(id, current => ({
+        ...current,
+        groupChatHistory: [...current.groupChatHistory, playerMessage],
+      }));
 
-            send({
-              type: 'npc_start',
-              characterId: item.characterId,
-              text: '',
-            });
-          }
+      if (!updated) {
+        return Response.json({ error: 'Failed to update session' }, { status: 500 });
+      }
 
-          const previous = finalTexts.get(item.characterId) ?? '';
-          finalTexts.set(item.characterId, previous + item.text);
+      workingSession = updated;
+    }
 
-          send({
-            type: 'npc_chunk',
-            characterId: item.characterId,
-            text: item.text,
-          });
-        }
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (payload: unknown) => {
+          controller.enqueue(encoder.encode(createSSEData(payload)));
+        };
 
-        if (activeCharacterId) {
-          send({
-            type: 'npc_done',
-            characterId: activeCharacterId,
-            text: finalTexts.get(activeCharacterId) ?? '',
-          });
-        }
+        let activeCharacterId: string | null = null;
+        const finalTexts = new Map<string, string>();
+        const responseOrder: string[] = [];
 
-        if (finalTexts.size > 0) {
-          updateSession(id, current => {
-            const nextHistory = [...current.groupChatHistory];
-            const nextMemories = { ...current.characterMemories };
-
-            for (const characterId of responseOrder) {
-              const fullText = finalTexts.get(characterId)?.trim();
-              if (!fullText) {
-                continue;
-              }
-
-              nextHistory.push({
-                id: randomUUID(),
-                role: 'npc',
-                characterId,
-                content: fullText,
-                timestamp: Date.now(),
-              });
-
-              const currentMemory = nextMemories[characterId];
-              if (!currentMemory) {
-                continue;
-              }
-
-              let updatedMemory = currentMemory;
-
-              if (message) {
-                updatedMemory = appendConversation(updatedMemory, {
-                  role: 'player',
-                  content: message,
-                  characterId,
+        try {
+          for await (const item of manageGroupResponse(workingSession, message)) {
+            if (item.characterId !== activeCharacterId) {
+              if (activeCharacterId) {
+                send({
+                  type: 'npc_done',
+                  characterId: activeCharacterId,
+                  text: finalTexts.get(activeCharacterId) ?? '',
                 });
               }
 
-              updatedMemory = appendConversation(updatedMemory, {
-                role: 'npc',
-                content: fullText,
-                characterId,
-              });
+              activeCharacterId = item.characterId;
+              responseOrder.push(item.characterId);
 
-              nextMemories[characterId] = updatedMemory;
+              send({
+                type: 'npc_start',
+                characterId: item.characterId,
+                text: '',
+              });
             }
 
-            return {
-              ...current,
-              groupChatHistory: nextHistory,
-              characterMemories: nextMemories,
-            };
-          });
-        }
-      } catch (error) {
-        console.error('Group chat stream failed:', error);
-      } finally {
-        controller.close();
-      }
-    },
-  });
+            const previous = finalTexts.get(item.characterId) ?? '';
+            finalTexts.set(item.characterId, previous + item.text);
 
-  return new Response(stream, {
-    headers: sseHeaders(),
-  });
+            send({
+              type: 'npc_chunk',
+              characterId: item.characterId,
+              text: item.text,
+            });
+          }
+
+          if (activeCharacterId) {
+            send({
+              type: 'npc_done',
+              characterId: activeCharacterId,
+              text: finalTexts.get(activeCharacterId) ?? '',
+            });
+          }
+
+          if (finalTexts.size > 0) {
+            updateSession(id, current => {
+              const nextHistory = [...current.groupChatHistory];
+              const nextMemories = { ...current.characterMemories };
+
+              for (const characterId of responseOrder) {
+                const fullText = finalTexts.get(characterId)?.trim();
+                if (!fullText) {
+                  continue;
+                }
+
+                nextHistory.push({
+                  id: randomUUID(),
+                  role: 'npc',
+                  characterId,
+                  content: fullText,
+                  timestamp: Date.now(),
+                });
+
+                const currentMemory = nextMemories[characterId];
+                if (!currentMemory) {
+                  continue;
+                }
+
+                let updatedMemory = currentMemory;
+
+                if (message) {
+                  updatedMemory = appendConversation(updatedMemory, {
+                    role: 'player',
+                    content: message,
+                    characterId,
+                  });
+                }
+
+                updatedMemory = appendConversation(updatedMemory, {
+                  role: 'npc',
+                  content: fullText,
+                  characterId,
+                });
+
+                nextMemories[characterId] = updatedMemory;
+              }
+
+              return {
+                ...current,
+                groupChatHistory: nextHistory,
+                characterMemories: nextMemories,
+              };
+            });
+          }
+        } catch (error) {
+          console.error('Group chat stream failed:', error);
+          send({ type: 'error', message: 'NPC group stream failed' });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: sseHeaders(),
+    });
+  } catch (error) {
+    console.error('Group chat route failed:', error);
+    return Response.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

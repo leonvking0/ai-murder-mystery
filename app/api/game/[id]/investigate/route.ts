@@ -11,55 +11,60 @@ interface RouteContext {
 }
 
 export async function POST(req: Request, context: RouteContext): Promise<Response> {
-  const { id } = await context.params;
-
-  let body: InvestigateRequestBody;
-
   try {
-    body = (await req.json()) as InvestigateRequestBody;
-  } catch {
-    body = {};
-  }
+    const { id } = await context.params;
 
-  const locationId = body.locationId?.trim();
-  if (!locationId) {
-    return Response.json({ error: 'locationId is required' }, { status: 400 });
-  }
+    let body: InvestigateRequestBody;
 
-  const session = getSession(id);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
-  }
-
-  const scenario = getScenarioById(session.scenarioId);
-  if (!scenario) {
-    return Response.json({ error: 'Scenario not found' }, { status: 404 });
-  }
-
-  if (!getPhaseConfig(session.currentPhase).allowsInvestigation) {
-    return Response.json(
-      { error: `Investigation is disabled during phase ${session.currentPhase}` },
-      { status: 403 },
-    );
-  }
-
-  try {
-    const { nextSession, result } = investigateLocation(session, scenario, locationId);
-    const saved = updateSession(id, nextSession);
-
-    if (!saved) {
-      return Response.json({ error: 'Failed to update session' }, { status: 500 });
+    try {
+      body = (await req.json()) as InvestigateRequestBody;
+    } catch {
+      body = {};
     }
 
-    return Response.json({
-      session: saved,
-      scenario,
-      result,
-    });
+    const locationId = body.locationId?.trim();
+    if (!locationId) {
+      return Response.json({ error: 'locationId is required' }, { status: 400 });
+    }
+
+    const session = getSession(id);
+    if (!session) {
+      return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    const scenario = getScenarioById(session.scenarioId);
+    if (!scenario) {
+      return Response.json({ error: 'Scenario not found' }, { status: 404 });
+    }
+
+    if (!getPhaseConfig(session.currentPhase).allowsInvestigation) {
+      return Response.json(
+        { error: `Investigation is disabled during phase ${session.currentPhase}` },
+        { status: 403 },
+      );
+    }
+
+    try {
+      const { nextSession, result } = investigateLocation(session, scenario, locationId);
+      const saved = updateSession(id, nextSession);
+
+      if (!saved) {
+        return Response.json({ error: 'Failed to update session' }, { status: 500 });
+      }
+
+      return Response.json({
+        session: saved,
+        scenario,
+        result,
+      });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Investigation failed' },
+        { status: 400 },
+      );
+    }
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Investigation failed' },
-      { status: 400 },
-    );
+    console.error('Investigate route failed:', error);
+    return Response.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
