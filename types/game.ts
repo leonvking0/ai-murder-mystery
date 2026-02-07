@@ -214,8 +214,13 @@ export interface InvestigateRequest {
 }
 
 export interface VoteRequest {
-  sessionId: string;
-  votedForId: string;
+  accusedCharacterId: string;
+}
+
+export interface VoteResponse {
+  success: true;
+  accusedId: string;
+  isCorrect: boolean;
 }
 
 export interface InvestigationResult {
