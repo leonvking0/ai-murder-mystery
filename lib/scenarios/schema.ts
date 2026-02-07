@@ -1,7 +1,7 @@
 // Scenario Schema Validation
 // Validates scenario JSON files against expected structure
 
-import type { Scenario, Character, InvestigationLocation, Clue } from '@/types/game';
+import type { Scenario, Character } from '../../types/game';
 
 export class ScenarioValidationError extends Error {
   constructor(message: string, public path: string) {

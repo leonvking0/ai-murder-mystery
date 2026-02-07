@@ -1,0 +1,641 @@
+{
+  "id": "storm-mansion",
+  "title": "暴风雪山庄",
+  "description": "一场暴风雪封住了出山唯一道路，五位各怀心事的宾客被困在深山别墅。清晨，庄主沈承泽被发现死于反锁书房，现场几乎没有外力入侵痕迹。每个人都在撒谎，每个人都藏着不能见光的过去，而真相埋在多年旧案与今夜的背叛里。",
+  "playerCount": {
+    "min": 1,
+    "max": 1
+  },
+  "difficulty": "medium",
+  "estimatedDuration": 60,
+  "setting": {
+    "era": "现代",
+    "location": "深山别墅",
+    "atmosphere": "寒潮突袭，山路封闭，整栋别墅被风雪包围。夜里电压忽高忽低，走廊灯时亮时灭，老式木地板在无人处发出吱呀声。窗外是吞没视线的白色风墙，室内壁炉明灭不定，暖意掩不住人心的寒意。",
+    "backgroundStory": "沈承泽经营的承泽生物近年风波不断，仍坚持在祖传山庄举办周年晚宴，邀请最亲近的家人与旧友共度一夜。晚宴开始前气象站发布暴雪红色预警，众人被迫留宿。次日清晨，管家称主人久未起身，众人破门后发现其死于书房。"
+  },
+  "case": {
+    "victim": "沈承泽（山庄主人）",
+    "causeOfDeath": "急性强心苷中毒引发恶性心律失常",
+    "timeOfDeath": "凌晨00:20-00:40",
+    "crimeScene": "书房（门窗反锁，表面为密室）",
+    "truth": "真凶是管家王大明。十年前，沈承泽在山坳村秘密进行违规药物试验，王大明的妻子王桂芬因不良反应死亡，事故被伪装成滑坡后遗症并压下。王大明改名入职山庄，长期收集证据，原本打算逼沈承泽公开忏悔。案发夜，王大明发现沈承泽准备把公司亏空与非法试验责任转嫁给女儿赵小雅，还威胁处理掉所有旧档。双方在书房激烈争执，王大明将提取自洋地黄的强心苷滴入沈承泽夜间安神酒中，待其发作后从书架暗门离开，经地下室返回，制造反锁密室假象。",
+    "murderMethod": "利用受害者固定夜饮习惯，在安神酒中投加强心苷，并借书房暗门完成进出",
+    "motive": "为亡妻与受害村民复仇，同时阻止沈承泽继续栽赃家人、销毁罪证"
+  },
+  "characters": [
+    {
+      "id": "lin-yuqing",
+      "name": "林雨晴",
+      "age": 36,
+      "occupation": "画廊主理人",
+      "personality": "克制、审美敏锐、善于在礼貌中施压，情绪几乎不外露",
+      "speakingStyle": "措辞精致，语速平稳，常用反问和留白，不轻易给出完整答案",
+      "publicInfo": "林雨晴是沈承泽的第二任妻子，外界印象里她优雅得体、长期负责山庄的艺术收藏与社交宴会安排。她几乎不参与公司经营，但在公开场合总能替丈夫圆场，被视为这个家“体面”的象征。与继女赵小雅关系表面平和，实则保持距离。林雨晴对外强调婚姻稳定，却常被媒体拍到独自出席活动。案发当晚她全程在场，熟悉别墅动线，也清楚每个人的作息习惯。过去三个月她频繁以慈善拍卖名义往返市区，外人都认为是为沈家修复口碑。她在晚宴中的沉默与镇定非常反常，让不少人怀疑她早就预见这场风暴会失控。",
+      "privateScript": "你和沈承泽的婚姻从一开始就更像交易。你需要资源与身份，他需要一个能维持公众形象的妻子。近两年你发现沈承泽财务状况恶化，还频繁失控，对你进行言语羞辱。你与陈志远发展出秘密关系，既有情感依赖，也有共同利益。案发夜22:40你在花园温室与陈志远短暂见面，讨论一份可能改变遗产分配的文件。23:50你曾经过书房走廊，听到屋内争执和玻璃碰撞声，但你选择离开，因为你不想被卷进正面冲突。00:10你回到客厅时看到王大明端着空托盘从侧廊快步经过，他神色异常却仍保持礼貌。你没有下毒，也不知道暗门细节，但你担心婚外情、资产转移以及你曾委托律师起草离婚预案的行为被曝光，一旦曝光你会成为最容易被集火的嫌疑人。你真正害怕的不是真相，而是自己在真相里看起来足够像凶手。",
+      "isKiller": false,
+      "relationships": [
+        {
+          "characterId": "chen-zhiyuan",
+          "publicRelation": "丈夫的生意伙伴，社交往来频繁",
+          "privateRelation": "秘密情人，彼此利用也彼此依赖"
+        },
+        {
+          "characterId": "zhao-xiaoya",
+          "publicRelation": "继母与继女，礼貌相处",
+          "privateRelation": "互相提防，你同情她却不敢真正站队"
+        },
+        {
+          "characterId": "wang-daming",
+          "publicRelation": "主人与管家的雇佣关系",
+          "privateRelation": "你察觉他并非表面顺从，但不知道他真实目的"
+        },
+        {
+          "characterId": "li-jiaoshou",
+          "publicRelation": "家宴常客，丈夫的老同学",
+          "privateRelation": "你知道他和沈承泽有旧账，曾暗中观察他们争执"
+        }
+      ],
+      "objectives": [
+        {
+          "description": "避免婚外情与资产转移行为被公开，保护自己的社会声誉与经济筹码",
+          "type": "primary",
+          "isSecret": true
+        },
+        {
+          "description": "推动调查朝“商业纠纷”方向发展，降低自己被锁定的概率",
+          "type": "secondary",
+          "isSecret": true
+        },
+        {
+          "description": "在不自爆秘密的前提下，确认赵小雅是否掌握会牵连你的证据",
+          "type": "secondary",
+          "isSecret": false
+        }
+      ],
+      "alibi": {
+        "claimed": "晚宴后一直在客厅壁炉旁看书，几乎没离开。",
+        "truth": "22:40在花园温室与陈志远私会，23:50经过书房走廊听到争执后返回客厅。"
+      },
+      "secrets": [
+        "与陈志远保持秘密恋情近半年",
+        "已通过海外账户悄悄转移部分夫妻共同资产"
+      ]
+    },
+    {
+      "id": "chen-zhiyuan",
+      "name": "陈志远",
+      "age": 42,
+      "occupation": "承泽生物合伙人",
+      "personality": "算计型现实主义者，反应快，擅长把问题转化成交易",
+      "speakingStyle": "逻辑强、句子短，爱用“先看证据”压场，回避情绪化问题",
+      "publicInfo": "陈志远是沈承泽多年的商业伙伴，主导公司融资与外部合作，外界普遍认为他是把承泽生物做大的关键人物之一。他在圈内口碑是精明、强势、极度看重结果，和沈承泽既合作又互相制衡。作为晚宴受邀核心宾客，他熟悉公司近期资金链压力，也知道沈承泽正尝试处理一批历史遗留项目。案发后，陈志远主动要求“按商业逻辑排查动机”，表现得冷静而专业。很多员工私下都说他能在一分钟内判断一场谈判谁会先让步，也能在危机中迅速找到替代方案。正因为他太擅长控场，众人对他“过于镇定”的表现更加警惕。",
+      "privateScript": "公司表面风光，实则你在过去一年激进加杠杆，利用关联公司做了高风险对赌，资金黑洞已经无法完全掩盖。沈承泽案发前正准备把部分责任公开切割到你身上，你必须抢在他出手前拿到关键合同和授权记录。你与林雨晴关系暧昧已久，互相共享部分信息。案发夜23:10你潜入客厅设备柜，删除了23:10到23:25的一段监控，目的是隐藏自己和林雨晴的行动轨迹，而不是行凶。你23:20短暂停留厨房寻找解酒药，看到研钵里有紫色残渣但没在意。23:30你又回到走廊确认书房门是否关闭，听见里面有男人压低声音争执，于是立刻离开。你不是凶手，但你做过监控篡改、账务伪装和关联交易掩盖，一旦被查实，你会同时失去职位、资产和谈判筹码。你知道自己已无退路。",
+      "isKiller": false,
+      "relationships": [
+        {
+          "characterId": "lin-yuqing",
+          "publicRelation": "合作伙伴家属，常一起出席活动",
+          "privateRelation": "秘密恋人，彼此交换对沈承泽不利的信息"
+        },
+        {
+          "characterId": "zhao-xiaoya",
+          "publicRelation": "长辈与晚辈，关系一般",
+          "privateRelation": "你担心她掌握公司黑料，曾尝试试探她的底牌"
+        },
+        {
+          "characterId": "wang-daming",
+          "publicRelation": "偶有工作交集的管家",
+          "privateRelation": "你低估了他，曾让他代收一份不能见光的快递"
+        },
+        {
+          "characterId": "li-jiaoshou",
+          "publicRelation": "学界顾问与企业方代表",
+          "privateRelation": "你知道他手里有旧案线索，想花钱私下摆平"
+        }
+      ],
+      "objectives": [
+        {
+          "description": "避免财务造假与监控篡改行为暴露，确保自己不成为第一嫌疑人",
+          "type": "primary",
+          "isSecret": true
+        },
+        {
+          "description": "引导他人把矛盾焦点放在家庭恩怨而非公司账务",
+          "type": "secondary",
+          "isSecret": false
+        },
+        {
+          "description": "说服林雨晴统一口径，避免彼此供述冲突",
+          "type": "secondary",
+          "isSecret": true
+        }
+      ],
+      "alibi": {
+        "claimed": "23点后头痛回客房休息，没有再去公共区域。",
+        "truth": "23:10在客厅删除监控片段，23:20去过厨房，23:35才回房。"
+      },
+      "secrets": [
+        "长期通过关联公司做账外资金腾挪",
+        "欠下高额个人对赌债务，急需通过遗产与股权重组脱身"
+      ]
+    },
+    {
+      "id": "zhao-xiaoya",
+      "name": "赵小雅",
+      "age": 21,
+      "occupation": "大学新闻系学生",
+      "personality": "叛逆敏感，正义感强，表面冲动但观察细致",
+      "speakingStyle": "直来直去，带年轻人口语和讽刺，情绪上来时会连珠炮发问",
+      "publicInfo": "赵小雅是沈承泽与前妻所生的独生女，正在读大学，过去一年与父亲关系急剧恶化。她反感家族企业的运作方式，经常公开表达对“资本包装”的厌恶，因此在家中被认为难以沟通。她熟悉别墅结构，童年长期在山庄生活。晚宴前她与父亲曾有激烈争吵，内容疑似涉及公司旧案和她未来去向。虽然年轻，她对在场每个人的微表情都很敏感，常能捕捉细节。她在学校社团里长期做公共议题调研，擅长查资料和追时间线，这让她在讨论中经常提出让成年人不舒服的问题。她看起来冲动，其实对很多人的弱点早有判断。",
+      "privateScript": "你最近匿名运营一个曝光账号，手里掌握父亲公司疑似违规试验的碎片证据。几周前你在地下室旧档案中看到“山坳村”与“试验补偿”的字样，怀疑父亲牵涉人命。案发夜22:50你再次潜入地下室，拿走一个装有历史账目的U盘副本。23:55你在书房外听到父亲和一名男性激烈争执，其中一句是“你欠她们一条命”。你吓得退回二楼，没有报警也没有敲门，因为你担心自己偷资料的事先被发现。00:30你曾在手机里写好给记者的匿名邮件草稿，但最终没有发送。你没杀人，但你确实试图把部分材料交给记者并伪造过一次父亲签名用于支付调查费，这些行为一旦公开会让你在游戏里处于极不利位置。你现在最纠结的是，要不要把手里证据一次性全摊开，还是继续保护还活着的人。",
+      "isKiller": false,
+      "relationships": [
+        {
+          "characterId": "lin-yuqing",
+          "publicRelation": "继母，维持表面客气",
+          "privateRelation": "你怀疑她只在乎财产，但也知道她并非完全冷血"
+        },
+        {
+          "characterId": "chen-zhiyuan",
+          "publicRelation": "父亲的生意伙伴",
+          "privateRelation": "你认定他是公司黑账关键人物之一"
+        },
+        {
+          "characterId": "wang-daming",
+          "publicRelation": "从小照顾你的管家叔叔",
+          "privateRelation": "你最信任他，却不知道他隐瞒了复仇计划"
+        },
+        {
+          "characterId": "li-jiaoshou",
+          "publicRelation": "父亲的老同学，家中长辈",
+          "privateRelation": "你向他旁敲侧击过旧案，他刻意回避核心事实"
+        }
+      ],
+      "objectives": [
+        {
+          "description": "查明父亲死亡与旧案真相，确认是否存在系统性掩盖",
+          "type": "primary",
+          "isSecret": false
+        },
+        {
+          "description": "隐藏自己偷取档案与伪造签名的行为，避免被先行定罪",
+          "type": "secondary",
+          "isSecret": true
+        },
+        {
+          "description": "在关键时刻保护王大明不被轻易当作替罪羊",
+          "type": "secondary",
+          "isSecret": true
+        }
+      ],
+      "alibi": {
+        "claimed": "11点后一直在房间写作业，没再下楼。",
+        "truth": "22:50去地下室取U盘，23:55在书房外听到争执后回房。"
+      },
+      "secrets": [
+        "匿名运营爆料账号并向媒体递送过家族企业资料",
+        "曾伪造父亲签名提取小额资金用于调查"
+      ]
+    },
+    {
+      "id": "wang-daming",
+      "name": "王大明",
+      "age": 45,
+      "occupation": "山庄管家",
+      "personality": "沉稳隐忍，执行力极强，习惯先观察后开口",
+      "speakingStyle": "礼貌克制、句子简短，常用事实描述回避主观判断",
+      "publicInfo": "王大明在山庄工作十二年，负责后勤、安保和日常管家事务，被所有人视为最可靠的“老管家”。他熟悉别墅每一把钥匙和每一段管线，遇到突发情况总是第一个出现。外人眼里他忠诚寡言，从不参与家族纠纷，也很少发表意见。暴雪夜停电与设备故障频发，王大明几乎整晚在各区域穿梭处理，很多人都默认他“忙得没空作案”。他同时也是次日清晨最早发现异常并组织破门的人。过去几年山庄每次改造都由他监督施工，连隐藏的检修通道和备用电路都只有他最熟，这种“无处不在”的存在感既让人安心，也让人后知后觉地感到不寒而栗。",
+      "privateScript": "你是本案凶手。你原名王德海，十年前妻子王桂芬在山坳村“援助用药”后身亡，官方结论含糊，你后来查到药物实际来自沈承泽主导的违规项目。你改名进入山庄，花了多年收集账本、病历和往来邮件，原计划逼沈承泽在公开场合承认真相。案发夜你得知他准备把公司亏空与非法试验责任转嫁给赵小雅，并在天亮前销毁地下室档案。23:50你在厨房把洋地黄提取液混入其固定夜饮的安神酒，00:05送入书房并与其对峙录音。沈承泽喝下后出现心律失常，你没有施救，而是从书架暗门离开，经地下室回到设备间，制造自己在修发电机的轨迹。你有复仇与阻止进一步伤害的动机，但你也清楚自己跨过了法律底线。你仍保留那段录音和病历，不只是为了脱罪，而是想让死去的人第一次被认真听见。",
+      "isKiller": true,
+      "relationships": [
+        {
+          "characterId": "lin-yuqing",
+          "publicRelation": "雇主家女主人与管家",
+          "privateRelation": "你知道她婚姻早已破裂，也知道她在隐瞒行踪"
+        },
+        {
+          "characterId": "chen-zhiyuan",
+          "publicRelation": "主人合作伙伴与管家",
+          "privateRelation": "你掌握他深夜篡改监控的证据，可随时反制"
+        },
+        {
+          "characterId": "zhao-xiaoya",
+          "publicRelation": "看着长大的小姐与管家",
+          "privateRelation": "你把她当女儿看，行凶部分原因是阻止她被沈承泽拖下水"
+        },
+        {
+          "characterId": "li-jiaoshou",
+          "publicRelation": "客人与管家",
+          "privateRelation": "你知道他当年参与项目伦理背书，但并非核心主谋"
+        }
+      ],
+      "objectives": [
+        {
+          "description": "避免被识破下毒与暗门动线，确保自己不被投票指认",
+          "type": "primary",
+          "isSecret": true
+        },
+        {
+          "description": "在可控范围内引导众人发现旧案真相，让沈承泽罪行被看见",
+          "type": "secondary",
+          "isSecret": true
+        },
+        {
+          "description": "保护赵小雅不因偷档案和情绪冲动成为主要嫌疑人",
+          "type": "secondary",
+          "isSecret": true
+        }
+      ],
+      "alibi": {
+        "claimed": "23:30到00:30一直在地下室设备间抢修备用发电机。",
+        "truth": "23:50在厨房下毒，00:05进入书房送酒并对峙，随后经暗门回地下室伪造检修轨迹。"
+      },
+      "secrets": [
+        "真实身份为王德海，曾改名入职山庄",
+        "地下室工具柜中藏有亡妻病历与多年搜集的旧案证据"
+      ]
+    },
+    {
+      "id": "li-jiaoshou",
+      "name": "李教授",
+      "age": 55,
+      "occupation": "大学伦理学教授",
+      "personality": "理性克制，重秩序与逻辑，内心有强烈自责",
+      "speakingStyle": "学院派表达，喜欢分点陈述，措辞严谨但偶尔闪烁",
+      "publicInfo": "李教授是沈承泽的大学同学，现任医学院伦理审查委员会成员，常以“学界朋友”身份被邀请出席沈家的聚会。外界认为他稳重公允，擅长调停争端，也曾公开为承泽生物的新项目站台。案发夜他与众人共同被困山庄，曾在晚宴中就“企业社会责任”与沈承泽有过激烈争论。作为熟悉医疗与药理的人，他在死因判断上具有天然话语权，因此既可能成为关键证人，也容易成为被怀疑对象。许多人把他当作“理性权威”，但他在旧案相关话题上的反复迟疑，暴露出这份权威背后并不干净的历史。",
+      "privateScript": "十年前你和沈承泽共同参与一个山区医疗资助计划。你当时为了保住项目经费，在伦理审查意见上做了妥协，后来事故发生，你选择沉默，职业生涯因此背负长期愧疚。近年你发现沈承泽仍在利用这段关系包装企业形象，决定在这次晚宴逼他签署书面道歉与补偿承诺。23:05你在书房与他发生争执，23:20离开时他仍清醒并在喝酒。你并未下毒，但你确实删除过自己邮箱中的部分旧邮件，害怕被追责。你知道王大明与旧案受害者有关，却不知道他会在当夜动手。你随身携带着当年的伦理评估草稿复印件，里面有你亲笔删改的痕迹，这份材料既能证明沈承泽长期隐瞒，也能证明你曾是帮凶。你想补救，却又害怕真相一旦完整公开，你多年建立的学术名声会瞬间崩塌。",
+      "isKiller": false,
+      "relationships": [
+        {
+          "characterId": "lin-yuqing",
+          "publicRelation": "多年社交场合旧识",
+          "privateRelation": "你认为她知道更多婚内内幕，只是选择沉默"
+        },
+        {
+          "characterId": "chen-zhiyuan",
+          "publicRelation": "企业代表与学术顾问",
+          "privateRelation": "你怀疑他操盘掩盖财务与旧案支出"
+        },
+        {
+          "characterId": "zhao-xiaoya",
+          "publicRelation": "长辈与晚辈，偶尔交流学业",
+          "privateRelation": "你欣赏她的正义感，但担心她鲁莽行事"
+        },
+        {
+          "characterId": "wang-daming",
+          "publicRelation": "客人与管家",
+          "privateRelation": "你认出他与旧案死者同姓，曾试探但被他回避"
+        }
+      ],
+      "objectives": [
+        {
+          "description": "推动公开调查旧案，在不彻底毁掉自己职业生涯的前提下补救",
+          "type": "primary",
+          "isSecret": true
+        },
+        {
+          "description": "证明自己不是凶手，避免“懂药理=会下毒”的直接指控",
+          "type": "secondary",
+          "isSecret": false
+        },
+        {
+          "description": "尽量保护赵小雅不被成人世界的旧账吞没",
+          "type": "secondary",
+          "isSecret": true
+        }
+      ],
+      "alibi": {
+        "claimed": "晚宴后回房备课，没有再接触受害者。",
+        "truth": "23:05在书房与沈承泽争执，23:20离开后回客房。"
+      },
+      "secrets": [
+        "当年曾在伦理审查意见中做过关键妥协",
+        "案发前删除过可能牵连自己的旧项目邮件"
+      ]
+    }
+  ],
+  "locations": [
+    {
+      "id": "study",
+      "name": "书房",
+      "description": "案发现场。厚重木门与双层窗都可上锁，墙面是整排古典书柜与壁炉。",
+      "clues": [
+        {
+          "id": "study-clue-01",
+          "content": "死者倒在书桌侧，酒杯底部有淡紫色残渍，气味发苦。",
+          "type": "public",
+          "significance": "指向可能的投毒而非突发心梗。",
+          "availableInRound": 1
+        },
+        {
+          "id": "study-clue-02",
+          "content": "书柜最内侧背板有新鲜刮痕与煤灰，像被短时间移动过。",
+          "type": "private",
+          "significance": "暗示书房存在非常规进出路径。",
+          "availableInRound": 1
+        },
+        {
+          "id": "study-clue-03",
+          "content": "壁炉灰烬中有未烧尽文件，出现“山坳村补偿名单”和“王桂芬”字样。",
+          "type": "public",
+          "significance": "把命案与十年前旧案直接关联。",
+          "availableInRound": 2
+        },
+        {
+          "id": "study-clue-04",
+          "content": "抽屉录音笔残留30秒：一名男声说“你欠她们一条命”，随后是剧烈咳嗽和杯子落地声。",
+          "type": "private",
+          "significance": "证明死前曾有对峙，且下毒者可能为男性。",
+          "availableInRound": 2
+        }
+      ]
+    },
+    {
+      "id": "living-room",
+      "name": "客厅",
+      "description": "公共活动区，壁炉、监控主机和通往花园的法式门都在这里。",
+      "clues": [
+        {
+          "id": "living-clue-01",
+          "content": "监控记录在23:10-23:25出现人为中断，日志显示账号“service01”登录。",
+          "type": "public",
+          "significance": "有人刻意清除关键时段行动轨迹。",
+          "availableInRound": 1
+        },
+        {
+          "id": "living-clue-02",
+          "content": "沙发缝里找到林雨晴与陈志远的亲密合照，拍摄时间为一周前。",
+          "type": "private",
+          "significance": "揭示两人隐秘关系与串供可能。",
+          "availableInRound": 1
+        },
+        {
+          "id": "living-clue-03",
+          "content": "客厅主钟被手动调慢12分钟，导致多人口供时间对不上。",
+          "type": "public",
+          "significance": "解释时间线混乱，也说明有人主动制造混淆。",
+          "availableInRound": 2
+        },
+        {
+          "id": "living-clue-04",
+          "content": "电视柜后贴着便签“service01:DM1987”，笔迹与王大明值班记录一致。",
+          "type": "private",
+          "significance": "将监控账号与管家身份直接挂钩。",
+          "availableInRound": 2
+        }
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "厨房",
+      "description": "食物与饮品准备区，夜间通常由管家单独值守。",
+      "clues": [
+        {
+          "id": "kitchen-clue-01",
+          "content": "水槽边研钵残留紫色植物碎末，经初步判断与洋地黄花瓣相符。",
+          "type": "public",
+          "significance": "指向强心苷来源和手工制备过程。",
+          "availableInRound": 1
+        },
+        {
+          "id": "kitchen-clue-02",
+          "content": "药柜领用本显示“地高辛滴剂”被取走，签名为王大明。",
+          "type": "private",
+          "significance": "下毒材料与管家直接关联。",
+          "availableInRound": 1
+        },
+        {
+          "id": "kitchen-clue-03",
+          "content": "垃圾桶有一次性手套与撕碎标签，能拼出“夜间安神酒专用”。",
+          "type": "public",
+          "significance": "证明有人对受害者固定饮品做过处理。",
+          "availableInRound": 2
+        },
+        {
+          "id": "kitchen-clue-04",
+          "content": "冰箱便签写着“沈先生00:00前温酒一杯，王管家送入书房”。",
+          "type": "private",
+          "significance": "锁定作案机会窗口与执行人。",
+          "availableInRound": 2
+        }
+      ]
+    },
+    {
+      "id": "garden",
+      "name": "花园",
+      "description": "带温室的后院花园，暴雪覆盖严重，但近门区域仍可辨识足迹。",
+      "clues": [
+        {
+          "id": "garden-clue-01",
+          "content": "温室角落的洋地黄被整齐剪去数枝，切口很新。",
+          "type": "public",
+          "significance": "与毒物来源形成闭环。",
+          "availableInRound": 1
+        },
+        {
+          "id": "garden-clue-02",
+          "content": "长椅下发现陈志远的公司印章，旁边有两只酒杯痕迹。",
+          "type": "private",
+          "significance": "证明其深夜与他人在花园密会。",
+          "availableInRound": 1
+        },
+        {
+          "id": "garden-clue-03",
+          "content": "后门锁芯有新润滑油与细小划痕，近三天内被频繁开合。",
+          "type": "public",
+          "significance": "说明有人利用花园门进行隐蔽移动。",
+          "availableInRound": 2
+        },
+        {
+          "id": "garden-clue-04",
+          "content": "雪地保留下两组关键足迹：男士皮鞋靠近书房外墙，女式短靴从温室折返客厅。",
+          "type": "private",
+          "significance": "支持多名嫌疑人夜间离开公共区域。",
+          "availableInRound": 2
+        }
+      ]
+    },
+    {
+      "id": "basement",
+      "name": "地下室",
+      "description": "包含设备间、酒窖与旧档案库，结构复杂且照明较差。",
+      "clues": [
+        {
+          "id": "basement-clue-01",
+          "content": "旧档案箱中有十年前“山坳村医疗补偿名单”，王桂芬名字被红笔圈出。",
+          "type": "public",
+          "significance": "揭示王大明与旧案受害者存在直接关联。",
+          "availableInRound": 1
+        },
+        {
+          "id": "basement-clue-02",
+          "content": "酒窖墙后暗门通往书房书柜背面，机关只在管家手册中有记录。",
+          "type": "private",
+          "significance": "破解密室，锁定熟悉结构者。",
+          "availableInRound": 2
+        },
+        {
+          "id": "basement-clue-03",
+          "content": "保险箱内有未签发的“债务转移协议”，拟将公司亏空责任转嫁给赵小雅。",
+          "type": "public",
+          "significance": "补强王大明“阻止继续伤害”的作案动机。",
+          "availableInRound": 2
+        },
+        {
+          "id": "basement-clue-04",
+          "content": "工具柜夹层藏有王桂芬死亡病历复印件，死因标注“强心苷相关中毒”。",
+          "type": "private",
+          "significance": "形成“旧案死因-本案死因”镜像，指向复仇链条。",
+          "availableInRound": 2
+        }
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "type": "intro",
+      "description": "阅读阶段：玩家阅读角色公开背景与当前局势，理解暴雪封山规则。",
+      "gmScript": "暴风雪切断道路，所有人暂时无法离开山庄。请先阅读背景，确认你掌握的信息边界。"
+    },
+    {
+      "type": "intro",
+      "description": "开场介绍：GM公布死者信息与基础案发事实，角色依次自我介绍。",
+      "gmScript": "清晨破门后，沈承泽被发现死于书房。现在请每位角色用一句话介绍自己昨夜的状态。"
+    },
+    {
+      "type": "discussion",
+      "round": 1,
+      "duration": 8,
+      "description": "第一轮讨论：围绕动机与不在场证明进行初步质询。"
+    },
+    {
+      "type": "investigation",
+      "round": 1,
+      "duration": 8,
+      "description": "第一轮搜证：可前往任一地点搜集第一批线索。"
+    },
+    {
+      "type": "discussion",
+      "round": 2,
+      "duration": 8,
+      "description": "第二轮讨论：结合线索验证口供矛盾，建立嫌疑人优先级。"
+    },
+    {
+      "type": "investigation",
+      "round": 2,
+      "duration": 8,
+      "description": "第二轮搜证：开放关键线索，重点破解密室与毒物来源。"
+    },
+    {
+      "type": "discussion",
+      "round": 3,
+      "duration": 10,
+      "description": "最终讨论：整合完整时间线，确定唯一投票目标。"
+    },
+    {
+      "type": "vote",
+      "description": "投票阶段：玩家指认凶手并陈述核心证据链。",
+      "gmScript": "请给出你的最终指认对象，并用三条关键证据说明理由。"
+    },
+    {
+      "type": "reveal",
+      "description": "揭晓阶段：GM公布真相、复盘误导点与角色隐藏秘密。",
+      "gmScript": "真相并不只关于谁杀了人，也关于谁让这场悲剧延续了十年。"
+    }
+  ],
+  "timeline": [
+    {
+      "time": "18:40",
+      "event": "暴雪预警升级，山路封闭，五名宾客确认留宿山庄。",
+      "involvedCharacters": [
+        "lin-yuqing",
+        "chen-zhiyuan",
+        "zhao-xiaoya",
+        "wang-daming",
+        "li-jiaoshou"
+      ],
+      "isPublicKnowledge": true
+    },
+    {
+      "time": "19:30",
+      "event": "晚宴开始，沈承泽宣布将连夜处理公司重组方案，气氛骤冷。",
+      "involvedCharacters": [
+        "lin-yuqing",
+        "chen-zhiyuan",
+        "zhao-xiaoya",
+        "li-jiaoshou"
+      ],
+      "isPublicKnowledge": true
+    },
+    {
+      "time": "22:40",
+      "event": "林雨晴与陈志远在花园温室私会，讨论遗产与公司后续安排。",
+      "involvedCharacters": [
+        "lin-yuqing",
+        "chen-zhiyuan"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "22:50",
+      "event": "赵小雅潜入地下室档案库，取走包含旧案流水的U盘副本。",
+      "involvedCharacters": [
+        "zhao-xiaoya"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "23:05",
+      "event": "李教授在书房与沈承泽争执，要求其签署补偿承诺后离开。",
+      "involvedCharacters": [
+        "li-jiaoshou"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "23:10-23:25",
+      "event": "陈志远登录客厅监控系统删除片段，意图隐藏自己与林雨晴行踪。",
+      "involvedCharacters": [
+        "chen-zhiyuan"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "23:50",
+      "event": "王大明在厨房处理洋地黄提取液并混入沈承泽夜间安神酒。",
+      "involvedCharacters": [
+        "wang-daming"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "00:05",
+      "event": "王大明将酒送入书房与沈承泽对峙，后者饮酒后出现中毒症状。",
+      "involvedCharacters": [
+        "wang-daming"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "00:20-00:40",
+      "event": "沈承泽死于急性强心苷中毒，王大明经书柜暗门离开并返回地下室伪造检修轨迹。",
+      "involvedCharacters": [
+        "wang-daming"
+      ],
+      "isPublicKnowledge": false
+    },
+    {
+      "time": "07:10",
+      "event": "王大明以“主人未应答”为由组织破门，众人发现尸体并进入封闭调查。",
+      "involvedCharacters": [
+        "lin-yuqing",
+        "chen-zhiyuan",
+        "zhao-xiaoya",
+        "wang-daming",
+        "li-jiaoshou"
+      ],
+      "isPublicKnowledge": true
+    }
+  ]
+}
