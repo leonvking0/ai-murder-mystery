@@ -218,9 +218,25 @@ export interface VoteRequest {
   votedForId: string;
 }
 
+export interface InvestigationResult {
+  locationId: string;
+  locationName: string;
+  round: number;
+  newlyFound: Clue[];
+  alreadyFound: Clue[];
+  publicClues: Clue[];
+  privateClues: Clue[];
+}
+
 export interface GameStateResponse {
   session: GameSession;
   scenario: Scenario;
+}
+
+export interface InvestigateResponse {
+  session: GameSession;
+  scenario: Scenario;
+  result: InvestigationResult;
 }
 
 // ============ GM TYPES ============
