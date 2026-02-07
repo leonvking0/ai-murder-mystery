@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { streamNPCResponse } from '@/lib/agents/npc-agent';
+import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { appendConversation, summarizeConversations } from '@/lib/game-engine/memory-manager';
 import { getScenarioById, getSession, updateSession } from '@/lib/store/game-sessions';
 import type { ChatMessage, ChatRequest, GamePhase } from '@/types/game';
@@ -43,6 +44,13 @@ export async function POST(req: Request): Promise<Response> {
   const scenario = getScenarioById(session.scenarioId);
   if (!scenario) {
     return Response.json({ error: 'Scenario not found' }, { status: 404 });
+  }
+
+  if (!getPhaseConfig(session.currentPhase).allowsChat) {
+    return Response.json(
+      { error: `Chat is disabled during phase ${session.currentPhase}` },
+      { status: 403 },
+    );
   }
 
   const character = scenario.characters.find(item => item.id === targetCharacterId);

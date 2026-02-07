@@ -4,9 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CharacterCard } from '@/components/game/CharacterCard';
 import { ChatPanel } from '@/components/game/ChatPanel';
-import { Badge } from '@/components/ui/badge';
+import { PhaseIndicator } from '@/components/game/PhaseIndicator';
+import { PhaseTransition } from '@/components/game/PhaseTransition';
+import { Button } from '@/components/ui/button';
+import { getNextPhase } from '@/lib/game-engine/phase-manager';
 import { useGameStore } from '@/lib/store/game-store';
-import type { GameStateResponse, Scenario } from '@/types/game';
+import type { GamePhase, GameStateResponse, Scenario } from '@/types/game';
 
 interface GameClientProps {
   sessionId: string;
@@ -16,6 +19,9 @@ export function GameClient({ sessionId }: GameClientProps) {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+  const [transitionOpen, setTransitionOpen] = useState(false);
+  const [transitionPhase, setTransitionPhase] = useState<GamePhase>('READING');
 
   const selectedCharacterId = useGameStore(state => state.selectedCharacterId);
   const setSessionId = useGameStore(state => state.setSessionId);
@@ -51,6 +57,8 @@ export function GameClient({ sessionId }: GameClientProps) {
         setScenario(data.scenario);
         hydrateMessages(data.session.chatHistories);
         setPhase(data.session.currentPhase);
+        setTransitionPhase(data.session.currentPhase);
+        setTransitionOpen(true);
 
         if (data.scenario.characters.length > 0) {
           selectCharacter(data.scenario.characters[0].id);
@@ -83,6 +91,39 @@ export function GameClient({ sessionId }: GameClientProps) {
     return scenario.characters.find(character => character.id === selectedCharacterId) ?? null;
   }, [scenario, selectedCharacterId]);
 
+  const canAdvancePhase = getNextPhase(gamePhase) !== null;
+
+  const advancePhase = async () => {
+    if (advancing || !canAdvancePhase) {
+      return;
+    }
+
+    setAdvancing(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/game/${sessionId}/advance`, {
+        method: 'POST',
+      });
+
+      const payload = (await response.json()) as GameStateResponse & {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Failed to advance phase');
+      }
+
+      setPhase(payload.session.currentPhase);
+      setTransitionPhase(payload.session.currentPhase);
+      setTransitionOpen(true);
+    } catch (advanceError) {
+      setError(advanceError instanceof Error ? advanceError.message : '阶段推进失败');
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">
@@ -105,9 +146,6 @@ export function GameClient({ sessionId }: GameClientProps) {
         <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
           <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Characters</p>
           <h1 className="mt-2 text-xl font-semibold text-amber-100">{scenario.title}</h1>
-          <div className="mt-2 flex items-center gap-2">
-            <Badge className="bg-slate-700 text-slate-100">阶段 {gamePhase}</Badge>
-          </div>
 
           <div className="mt-4 space-y-2">
             {scenario.characters.map(character => (
@@ -121,9 +159,25 @@ export function GameClient({ sessionId }: GameClientProps) {
           </div>
         </aside>
 
-        <section className="min-h-[60vh] lg:min-h-0">
+        <section className="flex min-h-[60vh] flex-col gap-4 lg:min-h-0">
+          <PhaseIndicator phase={gamePhase} />
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              onClick={advancePhase}
+              disabled={advancing || !canAdvancePhase}
+              className="bg-amber-700 text-amber-50 hover:bg-amber-600"
+            >
+              {advancing ? '推进中...' : '推进到下一阶段'}
+            </Button>
+          </div>
           {selectedCharacter ? (
-            <ChatPanel sessionId={sessionId} character={selectedCharacter} />
+            <ChatPanel
+              sessionId={sessionId}
+              character={selectedCharacter}
+              disabled={gamePhase === 'READING'}
+              disabledReason="阅读阶段仅可查看资料，暂不开放对话。"
+            />
           ) : (
             <div className="flex h-full items-center justify-center rounded-2xl border border-slate-700/70 bg-slate-950/70 text-slate-400">
               请选择一位角色开始私聊
@@ -139,6 +193,12 @@ export function GameClient({ sessionId }: GameClientProps) {
           </div>
         </aside>
       </div>
+
+      <PhaseTransition
+        open={transitionOpen}
+        phase={transitionPhase}
+        onContinue={() => setTransitionOpen(false)}
+      />
     </main>
   );
 }

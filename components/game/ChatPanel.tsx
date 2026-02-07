@@ -12,6 +12,8 @@ import type { Character, ChatMessage } from '@/types/game';
 interface ChatPanelProps {
   sessionId: string;
   character: Character;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 function buildMessage(role: ChatMessage['role'], characterId: string, content: string): ChatMessage {
@@ -37,7 +39,7 @@ function parseSSEEvent(raw: string): unknown {
   return JSON.parse(dataLines.join('\n'));
 }
 
-export function ChatPanel({ sessionId, character }: ChatPanelProps) {
+export function ChatPanel({ sessionId, character, disabled = false, disabledReason }: ChatPanelProps) {
   const messages = useGameStore(state => state.messages[character.id] ?? []);
   const addMessage = useGameStore(state => state.addMessage);
 
@@ -56,7 +58,7 @@ export function ChatPanel({ sessionId, character }: ChatPanelProps) {
     event.preventDefault();
 
     const content = input.trim();
-    if (!content || typing) {
+    if (!content || typing || disabled) {
       return;
     }
 
@@ -172,16 +174,22 @@ export function ChatPanel({ sessionId, character }: ChatPanelProps) {
       </ScrollArea>
 
       <form onSubmit={submitMessage} className="border-t border-slate-700/60 p-4">
+        {disabled && (
+          <p className="mb-2 text-sm text-amber-200/90">
+            {disabledReason ?? '当前阶段暂不开放私聊。'}
+          </p>
+        )}
         <div className="flex gap-2">
           <Input
             value={input}
             onChange={event => setInput(event.target.value)}
             placeholder="问点什么，比如：昨晚你在哪里？"
+            disabled={disabled || typing}
             className="border-slate-600 bg-slate-900/80 text-slate-100 placeholder:text-slate-500"
           />
           <Button
             type="submit"
-            disabled={typing || !input.trim()}
+            disabled={typing || disabled || !input.trim()}
             className="bg-amber-700 text-amber-50 hover:bg-amber-600"
           >
             发送
