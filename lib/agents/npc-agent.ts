@@ -70,7 +70,7 @@ export async function* streamNPCResponse(
 
     const stream = streamChat({
       system: systemPrompt,
-      maxOutputTokens: 1000,
+      maxOutputTokens: 5000,
       temperature: 0.8,
       messages: [
         ...historyMessages,
@@ -112,7 +112,7 @@ export async function* streamNPCGroupResponse(
 
     const stream = streamChat({
       system: systemPrompt,
-      maxOutputTokens: 800,
+      maxOutputTokens: 5000,
       temperature: 0.8,
       messages: [
         {
