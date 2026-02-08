@@ -85,6 +85,7 @@ export async function POST(req: Request): Promise<Response> {
 
           const responseStream = streamNPCResponse({
             character,
+            allCharacters: scenario.characters,
             memory,
             conversationHistory: history,
             gameState: {

@@ -5,6 +5,7 @@ import { isLLMConfigured, streamChat } from '@/lib/agents/llm-provider';
 
 interface StreamNPCResponseParams {
   character: Character;
+  allCharacters: Character[];
   memory: CharacterMemory;
   conversationHistory: ChatMessage[];
   gameState: {
@@ -17,6 +18,7 @@ interface StreamNPCResponseParams {
 
 interface StreamNPCGroupResponseParams {
   character: Character;
+  allCharacters: Character[];
   memory: CharacterMemory;
   gameState: {
     phase: GamePhase;
@@ -50,6 +52,7 @@ export async function* streamNPCResponse(
 ): AsyncIterable<string> {
   const {
     character,
+    allCharacters,
     memory,
     conversationHistory,
     gameState,
@@ -62,12 +65,12 @@ export async function* streamNPCResponse(
   }
 
   try {
-    const systemPrompt = buildNPCSystemPrompt(character, memory, gameState);
+    const systemPrompt = buildNPCSystemPrompt(character, memory, gameState, allCharacters);
     const historyMessages = mapHistoryToModelMessages(conversationHistory);
 
     const stream = streamChat({
       system: systemPrompt,
-      maxOutputTokens: 500,
+      maxOutputTokens: 1000,
       temperature: 0.8,
       messages: [
         ...historyMessages,
@@ -92,6 +95,7 @@ export async function* streamNPCGroupResponse(
 ): AsyncIterable<string> {
   const {
     character,
+    allCharacters,
     memory,
     gameState,
     groupContext,
@@ -104,11 +108,11 @@ export async function* streamNPCGroupResponse(
   }
 
   try {
-    const systemPrompt = buildNPCSystemPrompt(character, memory, gameState);
+    const systemPrompt = buildNPCSystemPrompt(character, memory, gameState, allCharacters);
 
     const stream = streamChat({
       system: systemPrompt,
-      maxOutputTokens: 450,
+      maxOutputTokens: 800,
       temperature: 0.8,
       messages: [
         {

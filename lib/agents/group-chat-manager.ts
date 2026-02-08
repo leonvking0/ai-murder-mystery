@@ -95,6 +95,7 @@ export async function* manageGroupResponse(
 
     const responseStream = streamNPCGroupResponse({
       character,
+      allCharacters: scenario.characters,
       memory,
       gameState: {
         phase: session.currentPhase,

@@ -37,14 +37,56 @@ function formatPersonalMemory(memory: CharacterMemory): string {
   return conversationNotes;
 }
 
+function summarizePublicInfo(publicInfo: string): string {
+  const trimmed = publicInfo.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const firstSentence = trimmed.split(/[。！？!?]/)[0]?.trim() ?? '';
+  return firstSentence ? `${firstSentence}。` : '';
+}
+
+function formatKnownCharacters(allCharacters: Character[], currentCharacterId: string): string {
+  const others = allCharacters.filter(character => character.id !== currentCharacterId);
+  if (others.length === 0) {
+    return '暂无';
+  }
+
+  return others
+    .map(character => {
+      const profile = summarizePublicInfo(character.publicInfo);
+      return `- ${character.name}：${character.age}岁，${character.occupation}${profile ? `，${profile}` : ''}`;
+    })
+    .join('\n');
+}
+
+function formatRelationships(character: Character, allCharacters: Character[]): string {
+  if (character.relationships.length === 0) {
+    return '暂无已记录关系';
+  }
+
+  const characterNames = new Map(allCharacters.map(item => [item.id, item.name]));
+
+  return character.relationships
+    .map(relationship => {
+      const targetName = characterNames.get(relationship.characterId) ?? relationship.characterId;
+      return `- ${targetName}：公开关系：${relationship.publicRelation}；私下关系：${relationship.privateRelation}`;
+    })
+    .join('\n');
+}
+
 export function buildNPCSystemPrompt(
   character: Character,
   memory: CharacterMemory,
   gameState: NPCPromptGameState,
+  allCharacters: Character[],
 ): string {
   const knownClues = formatKnownClues(gameState.knownClues);
   const objectives = formatObjectives(character.objectives);
   const personalMemory = formatPersonalMemory(memory);
+  const knownCharacters = formatKnownCharacters(allCharacters, character.id);
+  const relationships = formatRelationships(character, allCharacters);
 
   return `你是${character.name}，${character.age}岁，${character.occupation}。
 
@@ -56,6 +98,12 @@ ${character.speakingStyle}
 
 ## 公开信息（所有人都知道）
 ${character.publicInfo}
+
+## 案件相关人物（所有人都认识）
+${knownCharacters}
+
+## 你与其他人物的关系（仅你可见）
+${relationships}
 
 ## 你的秘密（只有你知道，绝对不能直接告诉别人）
 ${character.privateScript}
