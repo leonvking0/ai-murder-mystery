@@ -38,13 +38,35 @@ function parseSSEEvent(raw: string): unknown {
   const dataLines = raw
     .split('\n')
     .filter(line => line.startsWith('data:'))
-    .map(line => line.slice(5).trim());
+    .map(line => line.slice(5).replace(/^ /, ''));
 
   if (dataLines.length === 0) {
     return null;
   }
 
-  return JSON.parse(dataLines.join('\n'));
+  try {
+    return JSON.parse(dataLines.join('\n'));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSSEText(text: string): string {
+  return text.replace(/\r\n/g, '\n');
+}
+
+function extractSSEEvents(buffer: string): { events: string[]; rest: string } {
+  const events: string[] = [];
+  let remaining = buffer;
+  let eventBoundary = remaining.indexOf('\n\n');
+
+  while (eventBoundary >= 0) {
+    events.push(remaining.slice(0, eventBoundary));
+    remaining = remaining.slice(eventBoundary + 2);
+    eventBoundary = remaining.indexOf('\n\n');
+  }
+
+  return { events, rest: remaining };
 }
 
 export function GroupChat({ sessionId, characters }: GroupChatProps) {
@@ -101,65 +123,84 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
         },
         body: JSON.stringify({
           message: trimmed,
         }),
       });
 
-      if (!response.ok || !response.body) {
+      if (!response.ok) {
         throw new Error('Failed to open group chat stream');
       }
 
-      const decoder = new TextDecoder();
-      const reader = response.body.getReader();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
+      const handleEvent = (rawEvent: string) => {
+        if (!rawEvent.trim()) {
+          return;
         }
 
-        buffer += decoder.decode(value, { stream: true });
+        const payload = parseSSEEvent(rawEvent) as
+          | { type: 'npc_start'; characterId: string; text?: string }
+          | { type: 'npc_chunk'; characterId: string; text: string }
+          | { type: 'npc_done'; characterId: string; text: string }
+          | { type: 'error'; message?: string }
+          | null;
 
-        while (buffer.includes('\n\n')) {
-          const eventBoundary = buffer.indexOf('\n\n');
-          const rawEvent = buffer.slice(0, eventBoundary);
-          buffer = buffer.slice(eventBoundary + 2);
+        if (!payload) {
+          return;
+        }
 
-          if (!rawEvent.trim()) {
-            continue;
+        if (payload.type === 'npc_start') {
+          setStreamingCharacterId(payload.characterId);
+          setStreamingText('');
+        }
+
+        if (payload.type === 'npc_chunk') {
+          setStreamingCharacterId(payload.characterId);
+          setStreamingText(previous => previous + payload.text);
+        }
+
+        if (payload.type === 'npc_done') {
+          if (payload.text.trim()) {
+            addGroupMessage(buildNPCMessage(payload.characterId, payload.text));
           }
 
-          const payload = parseSSEEvent(rawEvent) as
-            | { type: 'npc_start'; characterId: string; text?: string }
-            | { type: 'npc_chunk'; characterId: string; text: string }
-            | { type: 'npc_done'; characterId: string; text: string }
-            | null;
+          setStreamingCharacterId(null);
+          setStreamingText('');
+        }
 
-          if (!payload) {
-            continue;
+        if (payload.type === 'error') {
+          throw new Error(payload.message || 'Group chat stream error');
+        }
+      };
+
+      const reader = response.body?.getReader?.();
+      if (!reader) {
+        const fallbackText = normalizeSSEText(await response.text());
+        const { events, rest } = extractSSEEvents(fallbackText);
+        events.forEach(handleEvent);
+        if (rest.trim()) {
+          handleEvent(rest);
+        }
+      } else {
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
           }
 
-          if (payload.type === 'npc_start') {
-            setStreamingCharacterId(payload.characterId);
-            setStreamingText('');
-          }
+          buffer = normalizeSSEText(buffer + decoder.decode(value, { stream: true }));
+          const { events, rest } = extractSSEEvents(buffer);
+          buffer = rest;
+          events.forEach(handleEvent);
+        }
 
-          if (payload.type === 'npc_chunk') {
-            setStreamingCharacterId(payload.characterId);
-            setStreamingText(previous => previous + payload.text);
-          }
-
-          if (payload.type === 'npc_done') {
-            if (payload.text.trim()) {
-              addGroupMessage(buildNPCMessage(payload.characterId, payload.text));
-            }
-
-            setStreamingCharacterId(null);
-            setStreamingText('');
-          }
+        buffer = normalizeSSEText(buffer + decoder.decode());
+        if (buffer.trim()) {
+          handleEvent(buffer);
         }
       }
     } catch (error) {
