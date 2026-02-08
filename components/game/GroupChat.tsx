@@ -15,6 +15,15 @@ interface GroupChatProps {
   characters: Character[];
 }
 
+function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function buildPlayerMessage(content: string): ChatMessage {
   return {
     id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
@@ -119,88 +128,122 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
     setStreamingText('');
 
     try {
-      const response = await fetch(`/api/game/${sessionId}/group-chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-        },
-        body: JSON.stringify({
-          message: trimmed,
-        }),
-      });
+      if (isIOSDevice()) {
+        const response = await fetch(`/api/game/${sessionId}/group-chat-sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: trimmed,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error('Failed to open group chat stream');
-      }
-
-      const handleEvent = (rawEvent: string) => {
-        if (!rawEvent.trim()) {
-          return;
+        if (!response.ok) {
+          throw new Error('Failed to fetch group chat response');
         }
 
-        const payload = parseSSEEvent(rawEvent) as
-          | { type: 'npc_start'; characterId: string; text?: string }
-          | { type: 'npc_chunk'; characterId: string; text: string }
-          | { type: 'npc_done'; characterId: string; text: string }
-          | { type: 'error'; message?: string }
-          | null;
+        const payload = (await response.json()) as {
+          success?: boolean;
+          messages?: Array<{ characterId: string; text: string }>;
+          error?: string;
+        };
 
-        if (!payload) {
-          return;
+        if (!payload.success || !Array.isArray(payload.messages)) {
+          throw new Error(payload.error || 'Invalid group chat response');
         }
 
-        if (payload.type === 'npc_start') {
-          setStreamingCharacterId(payload.characterId);
-          setStreamingText('');
-        }
-
-        if (payload.type === 'npc_chunk') {
-          setStreamingCharacterId(payload.characterId);
-          setStreamingText(previous => previous + payload.text);
-        }
-
-        if (payload.type === 'npc_done') {
-          if (payload.text.trim()) {
-            addGroupMessage(buildNPCMessage(payload.characterId, payload.text));
+        for (const npcReply of payload.messages) {
+          if (!npcReply.characterId || !npcReply.text?.trim()) {
+            continue;
           }
 
-          setStreamingCharacterId(null);
-          setStreamingText('');
-        }
-
-        if (payload.type === 'error') {
-          throw new Error(payload.message || 'Group chat stream error');
-        }
-      };
-
-      const reader = response.body?.getReader?.();
-      if (!reader) {
-        const fallbackText = normalizeSSEText(await response.text());
-        const { events, rest } = extractSSEEvents(fallbackText);
-        events.forEach(handleEvent);
-        if (rest.trim()) {
-          handleEvent(rest);
+          addGroupMessage(buildNPCMessage(npcReply.characterId, npcReply.text));
         }
       } else {
-        const decoder = new TextDecoder();
-        let buffer = '';
+        const response = await fetch(`/api/game/${sessionId}/group-chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify({
+            message: trimmed,
+          }),
+        });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          buffer = normalizeSSEText(buffer + decoder.decode(value, { stream: true }));
-          const { events, rest } = extractSSEEvents(buffer);
-          buffer = rest;
-          events.forEach(handleEvent);
+        if (!response.ok) {
+          throw new Error('Failed to open group chat stream');
         }
 
-        buffer = normalizeSSEText(buffer + decoder.decode());
-        if (buffer.trim()) {
-          handleEvent(buffer);
+        const handleEvent = (rawEvent: string) => {
+          if (!rawEvent.trim()) {
+            return;
+          }
+
+          const payload = parseSSEEvent(rawEvent) as
+            | { type: 'npc_start'; characterId: string; text?: string }
+            | { type: 'npc_chunk'; characterId: string; text: string }
+            | { type: 'npc_done'; characterId: string; text: string }
+            | { type: 'error'; message?: string }
+            | null;
+
+          if (!payload) {
+            return;
+          }
+
+          if (payload.type === 'npc_start') {
+            setStreamingCharacterId(payload.characterId);
+            setStreamingText('');
+          }
+
+          if (payload.type === 'npc_chunk') {
+            setStreamingCharacterId(payload.characterId);
+            setStreamingText(previous => previous + payload.text);
+          }
+
+          if (payload.type === 'npc_done') {
+            if (payload.text.trim()) {
+              addGroupMessage(buildNPCMessage(payload.characterId, payload.text));
+            }
+
+            setStreamingCharacterId(null);
+            setStreamingText('');
+          }
+
+          if (payload.type === 'error') {
+            throw new Error(payload.message || 'Group chat stream error');
+          }
+        };
+
+        const reader = response.body?.getReader?.();
+        if (!reader) {
+          const fallbackText = normalizeSSEText(await response.text());
+          const { events, rest } = extractSSEEvents(fallbackText);
+          events.forEach(handleEvent);
+          if (rest.trim()) {
+            handleEvent(rest);
+          }
+        } else {
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            buffer = normalizeSSEText(buffer + decoder.decode(value, { stream: true }));
+            const { events, rest } = extractSSEEvents(buffer);
+            buffer = rest;
+            events.forEach(handleEvent);
+          }
+
+          buffer = normalizeSSEText(buffer + decoder.decode());
+          if (buffer.trim()) {
+            handleEvent(buffer);
+          }
         }
       }
     } catch (error) {

@@ -17,6 +17,15 @@ interface ChatPanelProps {
   disabledReason?: string;
 }
 
+function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function buildMessage(role: ChatMessage['role'], characterId: string, content: string): ChatMessage {
   return {
     id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
@@ -93,75 +102,106 @@ export function ChatPanel({ sessionId, character, disabled = false, disabledReas
     let npcText = '';
 
     try {
-      const response = await fetch('/api/game/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-        },
-        body: JSON.stringify({
-          sessionId,
-          targetCharacterId: character.id,
-          message: content,
-        }),
-      });
+      if (isIOSDevice()) {
+        const response = await fetch('/api/game/chat-sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId,
+            targetCharacterId: character.id,
+            message: content,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error('Failed to open chat stream');
-      }
-
-      const handleEvent = (rawEvent: string) => {
-        if (!rawEvent.trim()) {
-          return;
+        if (!response.ok) {
+          throw new Error('Failed to fetch chat response');
         }
 
-        const payload = parseSSEEvent(rawEvent) as
-          | { type: 'start' | 'done' }
-          | { type: 'chunk'; text: string }
-          | { type: 'error'; message?: string }
-          | null;
+        const payload = (await response.json()) as {
+          success?: boolean;
+          message?: string;
+          error?: string;
+        };
 
-        if (!payload) {
-          return;
+        if (!payload.success || typeof payload.message !== 'string') {
+          throw new Error(payload.error || 'Invalid chat response');
         }
 
-        if (payload.type === 'chunk') {
-          npcText += payload.text;
-          setStreamingText(npcText);
-        }
-
-        if (payload.type === 'error') {
-          throw new Error(payload.message || 'Chat stream error');
-        }
-      };
-
-      const reader = response.body?.getReader?.();
-      if (!reader) {
-        const fallbackText = normalizeSSEText(await response.text());
-        const { events, rest } = extractSSEEvents(fallbackText);
-        events.forEach(handleEvent);
-        if (rest.trim()) {
-          handleEvent(rest);
-        }
+        npcText = payload.message;
+        setStreamingText(npcText);
       } else {
-        const decoder = new TextDecoder();
-        let buffer = '';
+        const response = await fetch('/api/game/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify({
+            sessionId,
+            targetCharacterId: character.id,
+            message: content,
+          }),
+        });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
+        if (!response.ok) {
+          throw new Error('Failed to open chat stream');
+        }
+
+        const handleEvent = (rawEvent: string) => {
+          if (!rawEvent.trim()) {
+            return;
           }
 
-          buffer = normalizeSSEText(buffer + decoder.decode(value, { stream: true }));
-          const { events, rest } = extractSSEEvents(buffer);
-          buffer = rest;
-          events.forEach(handleEvent);
-        }
+          const payload = parseSSEEvent(rawEvent) as
+            | { type: 'start' | 'done' }
+            | { type: 'chunk'; text: string }
+            | { type: 'error'; message?: string }
+            | null;
 
-        buffer = normalizeSSEText(buffer + decoder.decode());
-        if (buffer.trim()) {
-          handleEvent(buffer);
+          if (!payload) {
+            return;
+          }
+
+          if (payload.type === 'chunk') {
+            npcText += payload.text;
+            setStreamingText(npcText);
+          }
+
+          if (payload.type === 'error') {
+            throw new Error(payload.message || 'Chat stream error');
+          }
+        };
+
+        const reader = response.body?.getReader?.();
+        if (!reader) {
+          const fallbackText = normalizeSSEText(await response.text());
+          const { events, rest } = extractSSEEvents(fallbackText);
+          events.forEach(handleEvent);
+          if (rest.trim()) {
+            handleEvent(rest);
+          }
+        } else {
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            buffer = normalizeSSEText(buffer + decoder.decode(value, { stream: true }));
+            const { events, rest } = extractSSEEvents(buffer);
+            buffer = rest;
+            events.forEach(handleEvent);
+          }
+
+          buffer = normalizeSSEText(buffer + decoder.decode());
+          if (buffer.trim()) {
+            handleEvent(buffer);
+          }
         }
       }
     } catch (error) {
