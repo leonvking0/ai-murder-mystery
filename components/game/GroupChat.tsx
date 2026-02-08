@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
+import { VisualNovelPortrait } from '@/components/game/VisualNovelPortrait';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,6 +60,20 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
     () => Object.fromEntries(characters.map(character => [character.id, character])),
     [characters],
   );
+  const activeSpeaker = useMemo(() => {
+    if (streamingCharacterId) {
+      return characterMap[streamingCharacterId] ?? null;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === 'npc' && message.characterId && characterMap[message.characterId]) {
+        return characterMap[message.characterId];
+      }
+    }
+
+    return characters[0] ?? null;
+  }, [characterMap, characters, messages, streamingCharacterId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -172,10 +187,11 @@ export function GroupChat({ sessionId, characters }: GroupChatProps) {
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-slate-600/80 bg-gradient-to-b from-slate-900/85 to-slate-950/90 backdrop-blur">
-      <div className="border-b border-slate-700/70 px-5 py-4">
-        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Group Chat</p>
-        <h2 className="mt-1 text-lg font-semibold text-amber-100">公共讨论区</h2>
-      </div>
+      <VisualNovelPortrait
+        speaker={activeSpeaker}
+        modeLabel="Group Chat"
+        subtitle={streamingCharacterId ? `${activeSpeaker?.name ?? 'NPC'} 正在发言...` : '公共讨论区：聚焦最后发言角色。'}
+      />
 
       <ScrollArea className="h-0 flex-1 px-4 py-4">
         <div className="space-y-3 pr-2">
