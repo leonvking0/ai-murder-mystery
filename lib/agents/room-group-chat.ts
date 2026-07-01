@@ -2,13 +2,11 @@
 // characters are driven by their players (their messages arrive through the group-chat route).
 
 import { streamNPCGroupResponse } from '@/lib/agents/npc-agent';
+import { tryReserveNpcTrigger } from '@/lib/agents/npc-voter';
+import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { npcCharacterIds } from '@/lib/game-engine/room-engine';
 import { toScenarioPublic } from '@/lib/scenarios/projection';
-import type { Character, GamePhase, Room, Scenario } from '@/types/game';
-
-function isDiscussionPhase(phase: GamePhase): boolean {
-  return phase === 'DISCUSSION_1' || phase === 'DISCUSSION_2' || phase === 'FINAL_DISCUSSION';
-}
+import type { Character, Room, Scenario } from '@/types/game';
 
 function buildGroupContext(room: Room, scenario: Scenario): string {
   const characterName = new Map(scenario.characters.map(character => [character.id, character.name]));
@@ -36,22 +34,28 @@ function buildGroupContext(room: Room, scenario: Scenario): string {
     .join('\n');
 }
 
-function pickResponders(room: Scenario, allRoom: Room, triggerText: string): string[] {
-  const npcIds = npcCharacterIds(allRoom);
+// NPCs a human named directly in the trigger text — by character name or id. Mentioned NPCs bypass
+// the per-room cooldown (a pointed question deserves an answer) and are prioritized as responders.
+function mentionedNpcIds(scenario: Scenario, room: Room, triggerText: string): string[] {
+  const normalized = triggerText.trim().toLowerCase();
+  if (!normalized) {
+    return [];
+  }
+  const nameById = new Map(scenario.characters.map(character => [character.id, character.name]));
+  return npcCharacterIds(room).filter(id => {
+    const name = nameById.get(id)?.toLowerCase() ?? '';
+    return (name && normalized.includes(name)) || normalized.includes(id.toLowerCase());
+  });
+}
+
+function pickResponders(scenario: Scenario, room: Room, mentioned: string[]): string[] {
+  const npcIds = npcCharacterIds(room);
   if (npcIds.length === 0) {
     return [];
   }
 
-  const normalized = triggerText.trim().toLowerCase();
-  const nameById = new Map(room.characters.map(character => [character.id, character.name]));
-
-  const mentioned = npcIds.filter(id => {
-    const name = nameById.get(id)?.toLowerCase() ?? '';
-    return (name && normalized.includes(name)) || normalized.includes(id);
-  });
-
   // Order remaining NPCs by who has spoken least recently.
-  const recent = allRoom.groupChatHistory
+  const recent = room.groupChatHistory
     .filter(message => message.role === 'npc' && message.characterId)
     .slice(-12);
   const speakCount = new Map<string, number>();
@@ -74,11 +78,25 @@ export async function* manageRoomGroupResponse(
   scenario: Scenario,
   triggerText: string,
 ): AsyncIterable<{ characterId: string; text: string }> {
-  if (!isDiscussionPhase(room.currentPhase)) {
+  // Unified chat gate: NPCs speak in exactly the phases that allow chat (INTRO + discussions). This is
+  // the single source of truth — the group-chat route enforces the same gate before calling us.
+  if (!getPhaseConfig(room.currentPhase).allowsChat) {
     return;
   }
 
-  const responders = pickResponders(scenario, room, triggerText);
+  if (npcCharacterIds(room).length === 0) {
+    return;
+  }
+
+  const mentioned = mentionedNpcIds(scenario, room, triggerText);
+
+  // Throttle BEFORE any LLM work: a mention bypasses the cooldown; everything obeys the token bucket.
+  // When throttled we intentionally yield nothing — not every human line should drag an NPC in.
+  if (!tryReserveNpcTrigger(room.id, mentioned.length > 0)) {
+    return;
+  }
+
+  const responders = pickResponders(scenario, room, mentioned);
   if (responders.length === 0) {
     return;
   }

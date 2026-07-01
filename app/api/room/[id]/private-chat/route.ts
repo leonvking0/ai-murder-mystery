@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 import { streamNPCResponse } from '@/lib/agents/npc-agent';
 import { appendConversation } from '@/lib/game-engine/memory-manager';
+import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
-import type { ChatMessage, GamePhase } from '@/types/game';
+import type { ChatMessage } from '@/types/game';
 
 export const maxDuration = 120;
 
@@ -16,10 +17,6 @@ interface PrivateChatBody {
 
 interface RouteContext {
   params: Promise<{ id: string }>;
-}
-
-function isDiscussionPhase(phase: GamePhase): boolean {
-  return phase === 'DISCUSSION_1' || phase === 'DISCUSSION_2' || phase === 'FINAL_DISCUSSION';
 }
 
 export async function POST(req: Request, context: RouteContext): Promise<Response> {
@@ -55,7 +52,7 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Not a member of this room' }, { status: 403 });
     }
 
-    if (!isDiscussionPhase(room.currentPhase)) {
+    if (!getPhaseConfig(room.currentPhase).allowsChat) {
       return Response.json({ error: `当前阶段不能私聊：${room.currentPhase}` }, { status: 403 });
     }
 
