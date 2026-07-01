@@ -20,6 +20,7 @@ The durable knowledge for this repo lives in **`docs/agent/`**. Treat it as your
 | `docs/agent/DECISIONS.md` | Decision log (ADR-style) — *why* things are the way they are | Before changing an architectural choice; append when you make one |
 | `docs/agent/PITFALLS.md` | Gotchas that already bit us (env, framework, runtime) | Before debugging; append when something surprises you |
 | `docs/agent/KNOWN-ISSUES.md` | Live bug/issue register with severity + status | Pick work from here; update status as you fix |
+| `docs/agent/BACKLOG.md` | Prioritized, batched task list (bugs + gameplay) linking KI ids | Pick the next task top-down; check items off as you land them |
 | `docs/agent/WORKING-MEMORY.md` | Short-term: current state, in-flight work, next steps, session handoff | Start & end of every session |
 
 **Rule:** when you learn something non-obvious, write it down in the right file. Long-term facts →

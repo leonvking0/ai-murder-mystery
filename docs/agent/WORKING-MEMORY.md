@@ -38,8 +38,35 @@ Docker Compose + SQLite volume.
 - Carry-forward polish: KI-009/010/011/015/016/027/030/031/032; NPC voting; human↔human DM;
   reconnect via signed cookie; prompt caching.
 
+## 2026-07-01 — full re-review of the room system (multi-agent, adversarially verified)
+
+Baseline green (typecheck/lint/test/build). 49 confirmed findings filed as **KI-034..KI-065** in
+KNOWN-ISSUES.md (1 critical, 3 high, ~13 medium, ~15 low, incl. 8 content bugs). Nothing changed in
+code — this was read-only review + doc registration.
+
+**Top of the fix list (start here):**
+1. **KI-034 (critical, security):** projection ships every player's `playerId`; it's also the only auth
+   token → any member reads others' secret scripts + `isKiller` via `GET /state?playerId=<other>`.
+   Needs a non-auth publicId for the client + signed httpOnly cookie for auth. This re-opens the
+   information-isolation guarantee that KI-001 was thought to close.
+2. **KI-036 (high):** INTRO phase is dead (3 `isDiscussionPhase` copies vs `allowsChat`) — unify the gate.
+3. **KI-035 (high):** concurrent group-chat + single-slot client streaming garbles bubbles / drops replies.
+4. **KI-037 (high):** NPC prompt is missing the public case facts + own `alibi.claimed`.
+
+**Gameplay:** engine stores lots of authored material (alibi.claimed, secrets, objectives, emotion/
+suspicion, NPC votes, GM narration) that's dead at the mechanics layer → discussion doesn't affect the
+ending, evidence doesn't affect NPCs, the ending has no win/loss. Priority-1 (all small, ~2 days):
+fix INTRO + unify chat gate + wire GM narration; faction win/loss reveal (killer-escapes-wins + reveal
+`playerId` to `buildReveal`); NPC prompt public facts/secrets/killer-strategy; NPC voting; "present clue"
+endpoint. Second tier: always-on case+script drawer, disconnect takeover + host handoff, discussion
+liveness (in-turn context refresh + idle nudge + NPC cross-talk), activate emotion/suspicion (KI-010),
+voting-integrity pack (all-voted gate + VOTING debate + tie revote + ballot reveal), investigation depth
+pack (search budget + fuzzy private-find broadcast + prerequisite chains + KI-030/031 content fixes).
+
+Review workflow run id: `wf_38044857-41a` (78 agents). Prior rebuild review: `wf_0d0409a1-7a9`.
+
 ## Handoff notes
 - As-built truth = `ARCHITECTURE.md` (now describes the room system). `AGENTS.md`/`PROJECT-BRIEF.md`
   are the original single-player *vision* — banner added.
 - Identity = server-minted `playerId` in localStorage (`lib/room/identity.ts`); possession == seat.
-- Review workflow run id: `wf_0d0409a1-7a9`.
+  ⚠️ This is exactly what KI-034 exploits — the seat token is also broadcast to every member.
