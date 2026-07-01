@@ -1,5 +1,11 @@
 # AGENTS.md - AI Murder Mystery Game
 
+> ⚠️ **This file is the original spec/vision, not the as-built system.** Parts are stale (e.g. the LLM
+> stack is the **Vercel AI SDK**, not `@anthropic-ai/sdk`; persistence is an **in-memory Map**, not
+> SQLite). For what's actually built, start at **`/CLAUDE.md`** and **`docs/agent/`**
+> (ARCHITECTURE / DECISIONS / PITFALLS / KNOWN-ISSUES / WORKING-MEMORY). On any conflict,
+> `docs/agent/ARCHITECTURE.md` wins.
+
 > This file is for AI coding agents. Read this before writing any code.
 
 ## What We're Building
