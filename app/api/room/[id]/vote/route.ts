@@ -1,10 +1,10 @@
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
+import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { publish } from '@/lib/realtime/room-bus';
 
 interface VoteBody {
-  playerId?: string;
   accusedCharacterId?: string;
 }
 
@@ -23,7 +23,10 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       body = {};
     }
 
-    const playerId = body.playerId?.trim() ?? '';
+    const playerId = getAuthedPlayerId(req, id);
+    if (!playerId) {
+      return Response.json({ error: 'Not authenticated for this room' }, { status: 403 });
+    }
     const accusedCharacterId = body.accusedCharacterId?.trim() ?? '';
 
     const room = getRoom(id);

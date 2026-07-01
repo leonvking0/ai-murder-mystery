@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { manageRoomGroupResponse } from '@/lib/agents/room-group-chat';
 import { appendConversation } from '@/lib/game-engine/memory-manager';
+import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { publish } from '@/lib/realtime/room-bus';
@@ -10,7 +11,6 @@ import type { ChatMessage, GamePhase } from '@/types/game';
 export const maxDuration = 300;
 
 interface GroupChatBody {
-  playerId?: string;
   message?: string;
 }
 
@@ -33,7 +33,10 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       body = {};
     }
 
-    const playerId = body.playerId?.trim() ?? '';
+    const playerId = getAuthedPlayerId(req, id);
+    if (!playerId) {
+      return Response.json({ error: 'Not authenticated for this room' }, { status: 403 });
+    }
     const message = (body.message ?? '').trim().slice(0, 2000);
 
     const room = getRoom(id);

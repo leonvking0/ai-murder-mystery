@@ -1,3 +1,4 @@
+import { withAuthCookie } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { createRoom } from '@/lib/store/rooms';
 
@@ -25,11 +26,13 @@ export async function POST(req: Request): Promise<Response> {
     const room = createRoom({ scenarioId, hostName });
     const host = room.players[0];
 
-    return Response.json({
-      roomId: room.id,
-      code: room.code,
-      playerId: host.id,
-    });
+    // Seat the host: bind their playerId into a signed httpOnly per-room cookie. The response body no
+    // longer needs to be trusted for auth — the cookie is the only credential the server verifies.
+    return withAuthCookie(
+      Response.json({ roomId: room.id, code: room.code, playerId: host.id }),
+      room.id,
+      host.id,
+    );
   } catch (error) {
     console.error('Create room failed:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });

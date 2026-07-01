@@ -1,3 +1,4 @@
+import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getRoom } from '@/lib/store/rooms';
 import { subscribe } from '@/lib/realtime/room-bus';
 import { encodeSSE, encodeSSEComment, sseHeaders } from '@/lib/realtime/sse';
@@ -17,6 +18,13 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
   const room = getRoom(id);
   if (!room) {
     return Response.json({ error: 'Room not found' }, { status: 404 });
+  }
+
+  // KI-038: the stream carries live group chat / clues, so only verified members may subscribe.
+  // EventSource sends same-origin cookies automatically, so no client header work is needed.
+  const playerId = getAuthedPlayerId(req, id);
+  if (!playerId || !room.players.some(player => player.id === playerId)) {
+    return Response.json({ error: 'Not a member of this room' }, { status: 403 });
   }
 
   const stream = new ReadableStream<Uint8Array>({

@@ -69,13 +69,16 @@ export function toScenarioPublic(scenario: Scenario): ScenarioPublic {
   };
 }
 
-function toPublicPlayer(player: Room['players'][number]): PublicPlayer {
+// Never expose another player's real `id` (KI-034): it is the seat auth credential. Only the
+// non-secret `publicId` (render key) plus a server-set `isSelf` marker for the requesting player.
+function toPublicPlayer(player: Room['players'][number], requestingPlayerId: string): PublicPlayer {
   return {
-    id: player.id,
+    publicId: player.publicId,
     name: player.name,
     isHost: player.isHost,
     connected: player.connected,
     assignedCharacterId: player.assignedCharacterId,
+    isSelf: player.id === requestingPlayerId,
   };
 }
 
@@ -116,7 +119,7 @@ export function projectRoomForPlayer(
       currentPhase: room.currentPhase,
       round: room.round,
       hostPlayerId: room.hostPlayerId,
-      players: room.players.map(toPublicPlayer),
+      players: room.players.map(player => toPublicPlayer(player, playerId)),
       publicClues: room.publicClues.map(toClueView),
       yourClues: (room.discoveredClues[playerId] ?? []).map(toClueView),
       groupChatHistory: room.groupChatHistory,

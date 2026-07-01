@@ -86,9 +86,10 @@ export function RoomClient({ code }: RoomClientProps) {
     if (!rid || !pid) {
       return;
     }
-    const res = await fetch(`/api/room/${rid}/state?playerId=${pid}`, { cache: 'no-store' });
+    // Auth is the httpOnly cookie (sent automatically for same-origin) — never a ?playerId= query.
+    const res = await fetch(`/api/room/${rid}/state`, { cache: 'no-store' });
     if (res.status === 403) {
-      // Stale identity → force rejoin.
+      // Missing/stale seat cookie → force rejoin (also clears our local bookkeeping).
       setPlayerIdState(null);
       setLoadState('need-join');
       return;
@@ -112,7 +113,8 @@ export function RoomClient({ code }: RoomClientProps) {
     if (!roomId || !playerId) {
       return;
     }
-    const source = new EventSource(`/api/room/${roomId}/events?playerId=${playerId}`);
+    // EventSource sends the same-origin httpOnly seat cookie automatically — no query token needed.
+    const source = new EventSource(`/api/room/${roomId}/events`);
     source.onmessage = event => {
       let payload: { type: string; [key: string]: unknown };
       try {
@@ -193,10 +195,11 @@ export function RoomClient({ code }: RoomClientProps) {
       if (!roomId || !playerId) {
         return null;
       }
+      // The server authenticates via the seat cookie; the body carries only action data (no playerId).
       const res = await fetch(`/api/room/${roomId}/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ playerId, ...body }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -230,6 +233,16 @@ export function RoomClient({ code }: RoomClientProps) {
       setError(e instanceof Error ? e.message : '推进失败');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doKick = async (publicId: string) => {
+    setError(null);
+    try {
+      await action('kick', { publicId });
+      await refetchState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '移除失败');
     }
   };
 
@@ -325,7 +338,9 @@ export function RoomClient({ code }: RoomClientProps) {
           <p className="mb-4 rounded-lg border border-red-500/40 bg-red-900/20 px-3 py-2 text-sm text-red-200">{error}</p>
         )}
 
-        {view.room.status === 'lobby' && <Lobby view={view} onStart={doStart} starting={busy} />}
+        {view.room.status === 'lobby' && (
+          <Lobby view={view} onStart={doStart} starting={busy} onKick={doKick} />
+        )}
 
         {phase === 'READING' && inProgress && (
           <RoleReveal view={view} onAdvance={doAdvance} advancing={busy} />

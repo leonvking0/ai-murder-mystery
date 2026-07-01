@@ -1,3 +1,4 @@
+import { getAuthedPlayerId, withAuthCookie } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { addPlayer, maxHumanPlayers } from '@/lib/game-engine/room-engine';
@@ -9,6 +10,34 @@ interface JoinBody {
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+// Per-IP sliding-window limit on *new seat* creation (KI-041) — stops a single client from flooding
+// the lobby with ghost seats. Refreshes/rejoins by an already-seated member skip this (cookie dedup
+// below), so this only throttles genuinely new seats. Module-level = per-process, fine for one container.
+const JOIN_WINDOW_MS = 20_000;
+const JOIN_MAX_PER_WINDOW = 5;
+const joinHits = new Map<string, number[]>();
+
+function clientIp(req: Request): string {
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.headers.get('x-real-ip')?.trim() || 'unknown';
+}
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const cutoff = now - JOIN_WINDOW_MS;
+  const hits = (joinHits.get(ip) ?? []).filter(timestamp => timestamp > cutoff);
+  if (hits.length >= JOIN_MAX_PER_WINDOW) {
+    joinHits.set(ip, hits);
+    return true;
+  }
+  hits.push(now);
+  joinHits.set(ip, hits);
+  return false;
 }
 
 export async function POST(req: Request, context: RouteContext): Promise<Response> {
@@ -32,12 +61,27 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }
 
+    // Dedup: if this browser already holds a valid seat cookie for a current member, return that
+    // membership instead of minting a second seat (idempotent rejoin; refreshes never flood).
+    const existingPlayerId = getAuthedPlayerId(req, id);
+    if (existingPlayerId && room.players.some(player => player.id === existingPlayerId)) {
+      return withAuthCookie(
+        Response.json({ roomId: id, code: room.code, playerId: existingPlayerId }),
+        id,
+        existingPlayerId,
+      );
+    }
+
     if (room.status !== 'lobby') {
       return Response.json({ error: '游戏已开始，无法加入' }, { status: 409 });
     }
 
     if (room.players.length >= maxHumanPlayers(scenario)) {
       return Response.json({ error: '房间已满' }, { status: 409 });
+    }
+
+    if (isRateLimited(clientIp(req))) {
+      return Response.json({ error: '加入过于频繁，请稍后再试' }, { status: 429 });
     }
 
     const name = (body.name ?? '').slice(0, 40);
@@ -58,7 +102,12 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
 
     publish(id, { type: 'room_state' });
 
-    return Response.json({ roomId: id, code: updated.code, playerId: newPlayerId });
+    // Seat the new player via signed httpOnly cookie (the only credential the server later trusts).
+    return withAuthCookie(
+      Response.json({ roomId: id, code: updated.code, playerId: newPlayerId }),
+      id,
+      newPlayerId,
+    );
   } catch (error) {
     console.error('Join room failed:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });

@@ -1,12 +1,9 @@
+import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { projectRoomForPlayer } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { advanceRoom, canAdvanceRoom } from '@/lib/game-engine/room-engine';
 import { publish } from '@/lib/realtime/room-bus';
-
-interface AdvanceBody {
-  playerId?: string;
-}
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -16,14 +13,10 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
   try {
     const { id } = await context.params;
 
-    let body: AdvanceBody;
-    try {
-      body = (await req.json()) as AdvanceBody;
-    } catch {
-      body = {};
+    const playerId = getAuthedPlayerId(req, id);
+    if (!playerId) {
+      return Response.json({ error: 'Not authenticated for this room' }, { status: 403 });
     }
-
-    const playerId = body.playerId?.trim() ?? '';
 
     const room = getRoom(id);
     if (!room) {
