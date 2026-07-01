@@ -1,90 +1,80 @@
-# AI Murder Mystery (剧本杀)
+# AI Murder Mystery (剧本杀) — multiplayer
 
-Web-based single-player murder mystery game where one player interacts with AI-controlled NPCs and a GM-driven phase engine.
+Web-based, multiplayer AI murder-mystery game. A host opens a **room**, friends join with a code, and
+each human is randomly assigned one of the cast — the remaining characters are played by AI. Discuss,
+privately interrogate the AI suspects, investigate locations, then vote for the killer. One-player
+rooms work too (you play one character, AI plays the rest).
 
-## Tech Stack
+> Working on the code? Start with [`CLAUDE.md`](./CLAUDE.md) and [`docs/agent/`](./docs/agent) — the
+> agent harness (architecture, decisions, known issues, working memory).
 
-- Next.js App Router + TypeScript
-- Tailwind CSS + shadcn/ui
-- Vercel AI SDK (`ai`) with multi-provider support:
-  - Anthropic via `@ai-sdk/anthropic` (`claude-sonnet-4-5`)
-  - Google via `@ai-sdk/google` (`gemini-2.0-flash`)
-- Zustand client store
-- In-memory session store (current), SQLite dependency available in project
-- SSE streaming for chat responses
+## Tech stack
 
-## Environment Variables
+- Next.js (App Router) + TypeScript, Tailwind + shadcn/ui
+- Vercel AI SDK (`ai`) → Google Gemini (default) or Anthropic Claude
+- SQLite (`better-sqlite3`) for room persistence
+- Realtime via in-process pub/sub + Server-Sent Events (native `EventSource`)
 
-Copy `.env.local.example` to `.env.local`:
+## Environment
+
+Copy `.env.local.example` → `.env.local` and set your key:
 
 ```bash
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=your_anthropic_api_key
-GOOGLE_GENERATIVE_AI_API_KEY=your_google_api_key
+LLM_PROVIDER=google                 # google (default) | anthropic
+GOOGLE_GENERATIVE_AI_API_KEY=...    # https://aistudio.google.com/apikey (free tier, no card)
+GOOGLE_MODEL=gemini-2.5-flash       # or gemini-2.5-flash-lite for busier rooms
+# ANTHROPIC_API_KEY=...             # optional; ANTHROPIC_MODEL=claude-sonnet-4-6
+DATABASE_PATH=./data/game.db        # SQLite file
 ```
 
-Provider switching:
-- `LLM_PROVIDER=anthropic` uses Claude (`claude-sonnet-4-5`)
-- `LLM_PROVIDER=google` uses Gemini (`gemini-2.0-flash`)
+> Gemini free tier is ~10 RPM / 250 requests/day. A busy multi-player room can hit that quickly —
+> use `gemini-2.5-flash-lite` (higher free RPM) or an Anthropic key for heavy play.
 
-If the selected provider key is missing, NPC/GM responses fall back to built-in safe placeholder lines so the game remains playable.
-
-## Run Locally
+## Run locally
 
 ```bash
 npm install
-npm run dev
+npm run dev          # http://localhost:3000
 ```
 
-Open `http://localhost:3000`.
+## Deploy (self-hosted / VPS, Docker Compose)
 
-## Game Flow (10 Phases)
+```bash
+cp .env.local.example .env.local   # add your API key
+docker compose up -d --build       # serves on :3000; SQLite persists in the game-data volume
+```
 
-1. `LOBBY`
-2. `READING`
-3. `INTRO`
-4. `DISCUSSION_1`
-5. `INVESTIGATION_1`
-6. `DISCUSSION_2`
-7. `INVESTIGATION_2`
-8. `FINAL_DISCUSSION`
-9. `VOTING`
-10. `REVEAL`
+## How to play
 
-Current session starts at `READING`.
+1. Open the app → **create a room** (enter a nickname) or **join** with a 5-char code.
+2. Share the room code / invite link with friends; they join the lobby.
+3. Host clicks **Start** → characters are randomly assigned (AI fills the rest).
+4. **Reading**: read your character's secret script (only you can see it).
+5. **Discussion**: talk in the public group chat (as your character); privately message AI suspects.
+6. **Investigation**: search locations for clues (public clues are shared; private ones are yours).
+7. **Voting**: everyone accuses a suspect; majority decides.
+8. **Reveal**: the truth, the killer, who played whom, and the vote tally.
 
-## Core Gameplay Rules
+The host advances phases. Rounds: Discussion → Investigation, twice, then Final Discussion → Vote →
+Reveal.
 
-- `READING` phase: chat is disabled.
-- Only `INVESTIGATION_1` and `INVESTIGATION_2` allow investigation.
-- `VOTING` phase accepts one player vote (`/api/game/[id]/vote`).
-- After vote submission, client auto-advances to `REVEAL`.
-- `REVEAL` shows correctness and full case truth.
+## Scripts
 
-## API Endpoints
+```bash
+npm run dev | build | start
+npm run lint
+npm run typecheck    # tsc --noEmit
+npm test             # info-isolation + store + bus regression (node --experimental-strip-types)
+```
 
-- `POST /api/game/create` - create new session
-- `GET /api/game/[id]/state` - get session + scenario
-- `POST /api/game/chat` - private chat SSE stream
-- `POST /api/game/[id]/group-chat` - group chat SSE stream
-- `POST /api/game/[id]/investigate` - investigate a location
-- `POST /api/game/[id]/vote` - submit final accusation
-- `POST /api/game/[id]/advance` - advance to next phase
+## Scenario
 
-## Sprint 7/8 Features Included
+Ships with 《暴风雪山庄》 (`data/scenarios/storm-mansion.json`): 5 characters, 5 locations,
+round-gated clues. Scenarios are validated at startup.
 
-- Voting API and voting UI panel
-- Reveal panel with dramatic staged sequence
-- Auto transition from `VOTING` to `REVEAL` after vote
-- Unified async loading/error states across key panels
-- Route-level `try/catch` error handling added for all game API routes
-- Header now shows scenario title + description
-- Responsive panel layout with dark theme-compatible styling
+## Design notes
 
-## Validation Performed
-
-- `npm run lint`
-- `npx tsc --noEmit`
-- Phase engine flow checks (10-phase order, phase capabilities, voting gate on advance)
-
-Note: Full localhost HTTP E2E could not be run in this sandbox because binding to local ports is restricted (`EPERM`).
+- **Information isolation** is enforced server-side: each client only ever receives public data + its
+  own character's secrets; the solution is sent only at the reveal. See
+  `lib/scenarios/projection.ts` and `tests/info-isolation.test.ts`.
+- API surface is under `app/api/room/*`. Full map: `docs/agent/ARCHITECTURE.md`.

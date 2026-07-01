@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    image: ai-murder-mystery
+    ports:
+      - "3000:3000"
+    # Put your keys in .env.local (copied from .env.local.example).
+    env_file:
+      - .env.local
+    environment:
+      - DATABASE_PATH=/app/data/game.db
+    volumes:
+      # Persist the SQLite database across restarts / redeploys.
+      - game-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  game-data:
