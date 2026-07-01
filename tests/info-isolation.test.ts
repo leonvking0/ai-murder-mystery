@@ -127,6 +127,40 @@ const tamperedToken = `player-A.${foreignToken.slice(foreignToken.indexOf('.') +
 check('verifyToken rejects a tampered/foreign token (claim player-A with player-B signature)', verifyToken('room-1', tamperedToken) === null);
 check('verifyToken rejects empty and malformed tokens', verifyToken('room-1', '') === null && verifyToken('room-1', 'garbage') === null && verifyToken('room-1', undefined) === null);
 
+console.log('NPC system prompt (KI-037 public facts / KI-040 injection guard):');
+const { buildNPCSystemPrompt } = await import('../lib/agents/prompts/npc-base.ts');
+const npcMemory = {
+  characterId: 'killer', privateScript: 'SECRET-SCRIPT-K', publicProfile: 'pub', objectives: [],
+  conversations: [], discoveredClues: [], knownFacts: [], suspicions: [], emotionalState: '平静',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const npcPrompt = buildNPCSystemPrompt(
+  scenario.characters[0], // the killer, in full
+  npcMemory,
+  { phase: 'DISCUSSION_1', knownClues: [], emotionalState: '平静' },
+  scenario.characters,
+  toScenarioPublic(scenario),
+);
+// KI-037 — the public case facts every human already sees must be in the NPC prompt.
+check('prompt has 案件公开事实 section', npcPrompt.includes('案件公开事实'));
+check('prompt has public victim/scene/time', npcPrompt.includes('study') && npcPrompt.includes('00:00'));
+check('prompt has public background story', npcPrompt.includes('背景故事'));
+check('prompt has public timeline event', npcPrompt.includes('PUBLIC-EVENT'));
+check('prompt has own claimed alibi', npcPrompt.includes('claimed') && npcPrompt.includes('不在场证明'));
+// KI-040 — the injection guard + player-speech delimiter must be present.
+check('prompt has injection guard section', npcPrompt.includes('安全与角色守则'));
+check('guard references <玩家发言> delimiter', npcPrompt.includes('<玩家发言>'));
+check('guard warns about fake 主持人 + REVEAL', npcPrompt.includes('主持人') && npcPrompt.includes('REVEAL'));
+// Isolation — the built prompt must NEVER leak the solution or another character's secrets.
+check('prompt hides case.truth/method/motive', !npcPrompt.includes('SECRET-TRUTH') && !npcPrompt.includes('SECRET-METHOD') && !npcPrompt.includes('SECRET-MOTIVE'));
+check('prompt hides own alibi.truth', !npcPrompt.includes('SECRET-ALIBI'));
+check('prompt hides other character private script', !npcPrompt.includes('SECRET-SCRIPT-O'));
+check('prompt hides other character secrets', !npcPrompt.includes('SECRET-2'));
+check('prompt hides clue.significance', !npcPrompt.includes('SECRET-SIGNIFICANCE'));
+check('prompt hides non-public timeline event', !npcPrompt.includes('SECRET-EVENT'));
+// The NPC's OWN private script is intentionally present (allowed — it drives its own role-play).
+check('prompt includes own private script', npcPrompt.includes('SECRET-SCRIPT-K'));
+
 console.log('Realtime bus:');
 const { publish, subscribe } = await import('../lib/realtime/room-bus.ts');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
