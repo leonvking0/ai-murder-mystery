@@ -4,9 +4,12 @@ import { google } from '@ai-sdk/google';
 
 export type LLMProvider = 'anthropic' | 'google';
 
-const DEFAULT_PROVIDER: LLMProvider = 'anthropic';
-const ANTHROPIC_MODEL = 'claude-sonnet-4-5';
-const GOOGLE_MODEL = 'gemini-3-flash-preview';
+// Default provider is Google Gemini (free tier: ~10 RPM / 250 RPD / 250K TPM, no card).
+// For higher-volume play (multiple players → many NPC calls per turn) set
+// GOOGLE_MODEL=gemini-2.5-flash-lite (higher free RPM, cheaper/faster).
+const DEFAULT_PROVIDER: LLMProvider = 'google';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? 'gemini-2.5-flash';
 
 interface StreamChatParams {
   system: string;
@@ -20,11 +23,15 @@ function parseProvider(rawProvider: string | undefined): LLMProvider {
     return 'google';
   }
 
-  return 'anthropic';
+  if (rawProvider === 'anthropic') {
+    return 'anthropic';
+  }
+
+  return DEFAULT_PROVIDER;
 }
 
 export function getLLMProvider(): LLMProvider {
-  return parseProvider(process.env.LLM_PROVIDER?.toLowerCase() ?? DEFAULT_PROVIDER);
+  return parseProvider(process.env.LLM_PROVIDER?.toLowerCase());
 }
 
 export function isLLMConfigured(provider = getLLMProvider()): boolean {

@@ -192,8 +192,149 @@ export interface ChatMessage {
   id: string;
   role: 'player' | 'npc' | 'gm' | 'system';
   characterId?: string;
+  // In multiplayer, a 'player' message is authored by a human; this is their player id.
+  playerId?: string;
   content: string;
   timestamp: number;
+}
+
+// ============ ROOM / MULTIPLAYER TYPES ============
+
+export type RoomStatus = 'lobby' | 'in_progress' | 'finished';
+
+export type CharacterControl =
+  | { kind: 'human'; playerId: string }
+  | { kind: 'npc' };
+
+export interface Player {
+  id: string;
+  name: string;
+  isHost: boolean;
+  assignedCharacterId?: string;
+  connected: boolean;
+  joinedAt: number;
+}
+
+export interface Room {
+  id: string;
+  code: string; // short shareable join code
+  scenarioId: string;
+  status: RoomStatus;
+  currentPhase: GamePhase;
+  round: number;
+  hostPlayerId: string;
+
+  players: Player[];
+  // Who controls each character once the game starts (random assignment).
+  characterControl: Record<string, CharacterControl>;
+  // Memory for NPC-controlled characters only (humans drive their own).
+  characterMemories: Record<string, CharacterMemory>;
+
+  // Per-player private notebook of discovered private clues (keyed by playerId).
+  discoveredClues: Record<string, Clue[]>;
+  // Public clues visible to everyone.
+  publicClues: Clue[];
+
+  groupChatHistory: ChatMessage[];
+  // Private 1:1 threads, keyed by `${playerId}:${characterId}`.
+  privateChats: Record<string, ChatMessage[]>;
+
+  // playerId -> accused characterId
+  votes: Record<string, string>;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---- Public projections (safe to send to clients pre-reveal) ----
+
+export interface CharacterPublic {
+  id: string;
+  name: string;
+  age: number;
+  occupation: string;
+  personality: string;
+  speakingStyle: string;
+  avatar?: string;
+  publicInfo: string;
+  publicRelations: { characterId: string; publicRelation: string }[];
+}
+
+export interface LocationPublic {
+  id: string;
+  name: string;
+  description: string;
+  image?: string;
+}
+
+// Clue as shown to a player: GM-only `significance` and round metadata are stripped (KI-006).
+export interface ClueView {
+  id: string;
+  content: string;
+  type: 'public' | 'private';
+  foundAt?: string; // human-readable location name
+}
+
+export interface ScenarioPublic {
+  id: string;
+  title: string;
+  description: string;
+  playerCount: { min: number; max: number };
+  difficulty: Scenario['difficulty'];
+  estimatedDuration: number;
+  setting: ScenarioSetting;
+  case: {
+    victim: string;
+    causeOfDeath: string;
+    timeOfDeath: string;
+    crimeScene: string;
+  };
+  characters: CharacterPublic[];
+  locations: LocationPublic[];
+  timeline: TimelineEvent[]; // public-knowledge events only
+}
+
+export interface PublicPlayer {
+  id: string;
+  name: string;
+  isHost: boolean;
+  connected: boolean;
+  assignedCharacterId?: string; // character *identity* is public once assigned; secrets are not
+}
+
+export interface RevealInfo {
+  truth: string;
+  murderMethod: string;
+  motive: string;
+  killerCharacterId: string;
+  characters: Character[]; // full cast incl. private data — only sent at REVEAL
+  cast: { characterId: string; playerName: string | null }[]; // who played whom (null = NPC)
+  tally: { characterId: string; votes: number }[];
+  accusedCharacterId: string | null; // most-voted character (null if no votes / tie)
+  groupCorrect: boolean; // did the group's majority accuse the killer
+}
+
+// What a single player is allowed to see.
+export interface PlayerRoomView {
+  room: {
+    id: string;
+    code: string;
+    status: RoomStatus;
+    currentPhase: GamePhase;
+    round: number;
+    hostPlayerId: string;
+    players: PublicPlayer[];
+    publicClues: ClueView[];
+    yourClues: ClueView[];
+    groupChatHistory: ChatMessage[];
+    yourPrivateChats: Record<string, ChatMessage[]>; // keyed by NPC characterId
+    voteCount: number;
+    youVotedFor?: string;
+  };
+  you: Player;
+  scenario: ScenarioPublic;
+  yourCharacter: Character | null; // full own character (own private script) once assigned
+  reveal?: RevealInfo; // only when currentPhase === 'REVEAL'
 }
 
 // ============ API TYPES ============
