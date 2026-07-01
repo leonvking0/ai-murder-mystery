@@ -80,3 +80,27 @@ was unreliable on iOS Safari/Chrome.
 **Decision:** Client picks the `-sync` route when it detects iOS, else uses SSE.
 **Consequences:** Logic is duplicated across the streaming and sync routes and across `ChatPanel` /
 `GroupChat`. Keep the two in sync when changing chat behavior, or refactor to share a core.
+
+## 2026-07-01 — Signed httpOnly cookie is the sole seat-auth credential — Accepted
+**Context:** The multiplayer routes trusted a `playerId` supplied in the query string (`?playerId=`),
+an `x-player-id` header, or the JSON body, and the `/state` projection shipped every member's real
+`playerId` in the roster (`toPublicPlayer` returned `id`). Since `playerId` was *also* the only auth
+token, any member could read another's id from the roster and `GET /state?playerId=<other>` to receive
+that player's full `yourCharacter` (privateScript, secrets, alibi.truth, isKiller) — one request
+revealed the solution (KI-034). `/events` (KI-038) and `/join` (KI-041) had no auth/limit at all.
+**Decision:** Seat auth is a signed, httpOnly, per-room cookie `mm_auth_<roomId>` (SameSite=Lax,
+Path=/). Token = `playerId.HMAC-SHA256(roomId:playerId)` via `node:crypto.createHmac` (no new deps),
+secret from `ROOM_AUTH_SECRET` with a documented dev fallback + one-time `console.warn`. Minted on
+**create** and **join** (`withAuthCookie`); every route resolves the acting player via
+`getAuthedPlayerId(req, roomId)` and 403s otherwise — query/header/body `playerId` are never trusted
+for auth again (closes KI-061's URL-token leak too). The roster projection exposes only a non-secret
+`publicId` (render key) + server-set `isSelf`; real `playerId`s never leave the server. `/events`
+verifies membership; `/join` dedups via the cookie and rate-limits new seats per IP; a host-only
+`/kick` (host = cookie == `hostPlayerId`) clears a ghost lobby seat. Binding both `roomId` and
+`playerId` into the MAC means a token can't be replayed across seats or rooms.
+**Why cookie, not a bearer body/header token:** httpOnly keeps the token out of JS (XSS can't read it)
+and `EventSource` sends it automatically for same-origin `/events`, so no client header plumbing.
+**Consequences:** `ROOM_AUTH_SECRET` MUST be set in production or tokens are forgeable via the dev
+fallback. Cookies are per-room, so one browser can hold several seats. `Player` gains a `publicId`;
+clients key/render off `publicId`/`isSelf` instead of `id`. localStorage `playerId` remains only as UX
+bookkeeping ("have I joined this room"), never as an auth credential.

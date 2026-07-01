@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.DATABASE_PATH ??= path.join(os.tmpdir(), `mm-test-${Date.now()}.db`);
+process.env.ROOM_AUTH_SECRET ??= 'test-secret-for-seat-auth';
 
 const { createRoom, getRoom, getRoomByCode, updateRoom } = await import('../lib/store/rooms.ts');
 const { projectRoomForPlayer, toScenarioPublic } = await import('../lib/scenarios/projection.ts');
@@ -96,6 +97,35 @@ check('no reveal payload pre-reveal', view.reveal === undefined);
 
 const reveal = projectRoomForPlayer({ ...playing, currentPhase: 'REVEAL' }, scenario, playerId)!;
 check('REVEAL exposes truth + killer id', reveal.reveal?.truth === 'SECRET-TRUTH' && reveal.reveal?.killerCharacterId === 'killer');
+
+console.log('Projected roster hides real player ids (KI-034):');
+// Two-member room: Alice (host) requests /state; Bob is the other player.
+const twoPlayerRoom = {
+  ...getRoom(room.id)!,
+  status: 'in_progress',
+  currentPhase: 'DISCUSSION_1',
+  players: [
+    { id: 'AUTH-ID-ALICE', publicId: 'pub-alice', name: 'Alice', isHost: true, connected: true, joinedAt: 1, assignedCharacterId: 'killer' },
+    { id: 'AUTH-ID-BOB', publicId: 'pub-bob', name: 'Bob', isHost: false, connected: true, joinedAt: 2, assignedCharacterId: 'other' },
+  ],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const aliceRoster = projectRoomForPlayer(twoPlayerRoom, scenario, 'AUTH-ID-ALICE')!.room.players;
+const rosterBlob = JSON.stringify(aliceRoster);
+check("projected players[] never leak another player's real auth id", !rosterBlob.includes('AUTH-ID-BOB'));
+check('projected players[] carry no real auth ids at all', !rosterBlob.includes('AUTH-ID-ALICE') && !rosterBlob.includes('AUTH-ID-BOB'));
+check('projected players[] expose publicId as the render key', aliceRoster.every(p => Boolean(p.publicId)) && aliceRoster.some(p => p.publicId === 'pub-bob'));
+check('isSelf marks the requester and only the requester', aliceRoster.filter(p => p.isSelf).length === 1 && aliceRoster.find(p => p.publicId === 'pub-alice')?.isSelf === true && aliceRoster.find(p => p.publicId === 'pub-bob')?.isSelf === false);
+
+console.log('Seat auth tokens (KI-034):');
+const { signToken, verifyToken } = await import('../lib/room/auth.ts');
+const validToken = signToken('room-1', 'player-A');
+check('verifyToken returns the playerId for a valid token', verifyToken('room-1', validToken) === 'player-A');
+check('verifyToken rejects a valid token replayed against a different room', verifyToken('room-2', validToken) === null);
+const foreignToken = signToken('room-1', 'player-B');
+const tamperedToken = `player-A.${foreignToken.slice(foreignToken.indexOf('.') + 1)}`;
+check('verifyToken rejects a tampered/foreign token (claim player-A with player-B signature)', verifyToken('room-1', tamperedToken) === null);
+check('verifyToken rejects empty and malformed tokens', verifyToken('room-1', '') === null && verifyToken('room-1', 'garbage') === null && verifyToken('room-1', undefined) === null);
 
 console.log('NPC system prompt (KI-037 public facts / KI-040 injection guard):');
 const { buildNPCSystemPrompt } = await import('../lib/agents/prompts/npc-base.ts');

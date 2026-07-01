@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { streamNPCResponse } from '@/lib/agents/npc-agent';
 import { appendConversation } from '@/lib/game-engine/memory-manager';
+import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import type { ChatMessage, GamePhase } from '@/types/game';
@@ -9,7 +10,6 @@ import type { ChatMessage, GamePhase } from '@/types/game';
 export const maxDuration = 120;
 
 interface PrivateChatBody {
-  playerId?: string;
   targetCharacterId?: string;
   message?: string;
 }
@@ -33,7 +33,10 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       body = {};
     }
 
-    const playerId = body.playerId?.trim() ?? '';
+    const playerId = getAuthedPlayerId(req, id);
+    if (!playerId) {
+      return Response.json({ error: 'Not authenticated for this room' }, { status: 403 });
+    }
     const targetCharacterId = body.targetCharacterId?.trim() ?? '';
     const message = (body.message ?? '').trim().slice(0, 2000);
 

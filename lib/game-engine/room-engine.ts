@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 
 import { initializeMemory } from '@/lib/game-engine/memory-manager';
 import { getNextPhase } from '@/lib/game-engine/phase-manager';
+import { generatePublicId } from '@/lib/room/auth';
 import type { CharacterControl, GamePhase, Player, Room, Scenario } from '@/types/game';
 
 function shuffle<T>(input: T[]): T[] {
@@ -19,6 +20,7 @@ function shuffle<T>(input: T[]): T[] {
 export function addPlayer(room: Room, name: string): { room: Room; player: Player } {
   const player: Player = {
     id: randomUUID(),
+    publicId: generatePublicId(),
     name: name.trim() || `玩家${room.players.length + 1}`,
     isHost: false,
     connected: true,

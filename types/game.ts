@@ -207,7 +207,11 @@ export type CharacterControl =
   | { kind: 'npc' };
 
 export interface Player {
+  // Secret auth credential (server-only): whoever presents a token bound to this id acts as this
+  // player. NEVER project another player's `id` to a client — use `publicId` for rendering.
   id: string;
+  // Non-secret, stable id used purely for client-side rendering/keys. Safe to expose to everyone.
+  publicId: string;
   name: string;
   isHost: boolean;
   assignedCharacterId?: string;
@@ -295,11 +299,14 @@ export interface ScenarioPublic {
 }
 
 export interface PublicPlayer {
-  id: string;
+  // Non-secret render id. This is NOT the auth `playerId` of anyone (KI-034): shipping real player
+  // ids let any member impersonate another and read their solution via /state.
+  publicId: string;
   name: string;
   isHost: boolean;
   connected: boolean;
   assignedCharacterId?: string; // character *identity* is public once assigned; secrets are not
+  isSelf: boolean; // server-set: true only for the requesting (cookie-authenticated) player
 }
 
 export interface RevealInfo {

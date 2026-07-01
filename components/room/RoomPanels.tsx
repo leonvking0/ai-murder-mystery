@@ -26,10 +26,12 @@ export function Lobby({
   view,
   onStart,
   starting,
+  onKick,
 }: {
   view: PlayerRoomView;
   onStart: () => void;
   starting: boolean;
+  onKick?: (publicId: string) => void;
 }) {
   const isHost = view.you.isHost;
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${view.room.code}` : '';
@@ -71,14 +73,25 @@ export function Lobby({
         <ul className="mt-2 space-y-2">
           {view.room.players.map(player => (
             <li
-              key={player.id}
+              key={player.publicId}
               className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
             >
               <span className="text-slate-100">
                 {player.name}
-                {player.id === view.you.id && <span className="ml-1 text-amber-300">（你）</span>}
+                {player.isSelf && <span className="ml-1 text-amber-300">（你）</span>}
               </span>
-              {player.isHost && <span className="text-xs text-amber-300">房主</span>}
+              <span className="flex items-center gap-2">
+                {player.isHost && <span className="text-xs text-amber-300">房主</span>}
+                {isHost && !player.isSelf && !player.isHost && onKick && (
+                  <button
+                    type="button"
+                    onClick={() => onKick(player.publicId)}
+                    className="rounded-md border border-rose-500/40 px-2 py-0.5 text-xs text-rose-200 hover:bg-rose-900/30"
+                  >
+                    移除
+                  </button>
+                )}
+              </span>
             </li>
           ))}
         </ul>
