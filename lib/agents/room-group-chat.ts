@@ -3,6 +3,7 @@
 
 import { streamNPCGroupResponse } from '@/lib/agents/npc-agent';
 import { npcCharacterIds } from '@/lib/game-engine/room-engine';
+import { toScenarioPublic } from '@/lib/scenarios/projection';
 import type { Character, GamePhase, Room, Scenario } from '@/types/game';
 
 function isDiscussionPhase(phase: GamePhase): boolean {
@@ -83,9 +84,9 @@ export async function* manageRoomGroupResponse(
   }
 
   const groupContext = buildGroupContext(room, scenario);
-  const effectivePrompt = triggerText.trim()
-    ? `玩家发言：${triggerText.trim()}`
-    : '继续刚才的群聊，补充一个新观点或新质疑，避免重复。';
+  // Pass the RAW player text through — npc-agent wraps it in <玩家发言> delimiters (or falls back
+  // to a self-prompt when empty). Never prefix/format player text here.
+  const scenarioPublic = toScenarioPublic(scenario);
 
   for (const characterId of responders) {
     const character: Character | undefined = scenario.characters.find(item => item.id === characterId);
@@ -109,7 +110,8 @@ export async function* manageRoomGroupResponse(
         emotionalState: memory.emotionalState,
       },
       groupContext,
-      playerMessage: effectivePrompt,
+      playerMessage: triggerText,
+      scenarioPublic,
     });
 
     for await (const chunk of stream) {
