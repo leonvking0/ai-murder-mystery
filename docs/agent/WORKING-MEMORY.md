@@ -2,6 +2,38 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-01 (evening) — Backlog Batch A + B IMPLEMENTED & MERGED
+
+**State:** Green. `npm test` now runs 3 files = **90 checks, all pass** (info-isolation 45 + gameplay-chat 19
++ gameplay-reveal 26). tsc/lint clean; authoritative Turbopack `npm run build` verified on every merge.
+
+**What landed (5 PRs merged to `main` this session, multi-agent orchestration — opus-4.8 workers in git
+worktrees, Fable orchestrated + audited every diff for the isolation invariant + merged):**
+- **PR #2** — KI-037 (NPC prompt gets public case facts + own `alibi.claimed`) + KI-040 (prompt-injection
+  guard section + `<玩家发言>` delimiters on all player text).
+- **PR #3** — KI-034 (critical): signed httpOnly per-room seat cookie `mm_auth_<roomId>` (HMAC via
+  `node:crypto`, secret `ROOM_AUTH_SECRET` + dev fallback) is now the SOLE auth; projections ship only
+  `publicId`+`isSelf`, never real `playerId`. Also KI-038 (SSE membership), KI-041 (join dedup+rate-limit+
+  host kick), KI-061 (no more `?playerId=`). New `lib/room/auth.ts`. ADR in DECISIONS.md.
+- **PR #4** — KI-036/057 (unified chat gate on `allowsChat` → INTRO works; GM narration broadcast on every
+  phase change), KI-045 (per-room NPC cooldown+token-bucket, empty-post 400), KI-013 (NPC voting via new
+  `lib/agents/npc-voter.ts`, keyed `npc:<id>`, killer never self-votes, rule-based no-LLM fallback).
+- **PR #5** — B2 faction win/loss reveal (killer-escapes-wins; `youWereKiller`+`outcome` on `RevealInfo`),
+  B5 present-clue (`presentClue` engine + `POST /present-clue`; presented clue projected via `toClueView`
+  so `significance` never leaks).
+
+**⚠️ Prod note:** set `ROOM_AUTH_SECRET` (long random) or seat tokens are forgeable via the dev fallback.
+
+**Recovery note:** the first reveal agent (`G-REVEAL`) stalled with zero output; re-dispatched as
+`G-REVEAL2` on a fresh worktree — clean.
+
+**Deferred follow-ups (small):** auto NPC self-intro on INTRO entry (players/nudge drive it now); the
+group-chat `groupContext` embeds prior player lines un-delimited — minor residual injection surface (the
+guard covers fake phase-change claims). Add these to Batch C/D thinking.
+
+**Next up:** Batch C (robustness) — KI-035 concurrent-turn/streaming, KI-049 idempotent advance,
+KI-046 SSE reconnect, KI-043 voting-integrity (all-voted gate + tie revote), etc. See BACKLOG.md.
+
 ## Snapshot — 2026-06-30 (multiplayer rebuild COMPLETE, end-to-end verified)
 
 **State:** Green — `npm run typecheck`, `npm test` (22/22), `npm run lint`, `npm run build` all pass.
