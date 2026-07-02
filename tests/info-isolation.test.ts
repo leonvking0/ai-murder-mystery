@@ -8,6 +8,10 @@ import path from 'node:path';
 
 process.env.DATABASE_PATH ??= path.join(os.tmpdir(), `mm-test-${Date.now()}.db`);
 process.env.ROOM_AUTH_SECRET ??= 'test-secret-for-seat-auth';
+// Force the offline path everywhere in this file (no live LLM calls): the C10 compaction check below
+// exercises summarizeConversations, which must take its no-LLM last-N join fallback.
+delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+delete process.env.ANTHROPIC_API_KEY;
 
 const { createRoom, getRoom, getRoomByCode, updateRoom } = await import('../lib/store/rooms.ts');
 const { projectRoomForPlayer, toScenarioPublic } = await import('../lib/scenarios/projection.ts');
@@ -160,6 +164,63 @@ check('prompt hides clue.significance', !npcPrompt.includes('SECRET-SIGNIFICANCE
 check('prompt hides non-public timeline event', !npcPrompt.includes('SECRET-EVENT'));
 // The NPC's OWN private script is intentionally present (allowed — it drives its own role-play).
 check('prompt includes own private script', npcPrompt.includes('SECRET-SCRIPT-K'));
+
+console.log('C7 private-chat memory isolation (KI-039) + labeling (KI-015) + C10 memory bounds (KI-021):');
+const { initializeMemory, appendConversation, compactConversationsIfNeeded } = await import('../lib/game-engine/memory-manager.ts');
+
+const npcX = scenario.characters[1]; // 'other' — an NPC a player privately chats with
+const SENTINEL_A = 'ALPHA-PRIVATE-SENTINEL-9f3a2'; // player A's private line to NPC X — must never leak
+
+// Baseline: shared memory starts empty, exactly as the game initializes it.
+const freshX = initializeMemory(npcX);
+check('C7 setup: fresh shared NPC memory has no conversations', freshX.conversations.length === 0);
+
+// Positive control (makes the assertion non-vacuous + documents the OLD leak): the PRE-fix private-chat
+// route appended the private turn into SHARED memory. If it still did, the sentinel WOULD render into
+// NPC X's prompt shown to ANY player — proving the sentinel is detectable and the old write was a real
+// player-to-player leak.
+const leakedX = appendConversation(freshX, { role: 'player', content: SENTINEL_A, characterId: npcX.id });
+const leakedPrompt = buildNPCSystemPrompt(npcX, leakedX, { phase: 'DISCUSSION_1', knownClues: [], emotionalState: '平静' }, scenario.characters, toScenarioPublic(scenario));
+check('C7 control: the pre-fix shared-memory write WOULD leak A private line into the prompt', leakedPrompt.includes(SENTINEL_A));
+
+// FIXED behavior: the private-chat route now writes A's turn ONLY to privateChats[`A:X`]; the shared
+// characterMemories[X] is left untouched. Mirror that exact persistence.
+const threadKeyAX = `player-A:${npcX.id}`;
+const roomAfterPrivate = {
+  characterMemories: { [npcX.id]: freshX }, // unchanged — the fix removed the shared-memory write
+  // Group context is rendered from groupChatHistory; it holds only public group lines, never a private turn.
+  groupChatHistory: [{ id: 'g1', role: 'player', characterId: npcX.id, playerId: 'player-B', content: 'PUBLIC-GROUP-LINE', timestamp: 3 }],
+  privateChats: {
+    [threadKeyAX]: [
+      { id: 'm1', role: 'player', characterId: npcX.id, playerId: 'player-A', content: SENTINEL_A, timestamp: 1 },
+      { id: 'm2', role: 'npc', characterId: npcX.id, content: 'ok', timestamp: 2 },
+    ],
+  },
+};
+const sharedX = roomAfterPrivate.characterMemories[npcX.id];
+check('C7: A private line is absent from NPC X shared memory', !JSON.stringify(sharedX.conversations).includes(SENTINEL_A));
+// Player B builds NPC X's prompt from the SHARED memory (B's own private thread with X is empty).
+const promptForB = buildNPCSystemPrompt(npcX, sharedX, { phase: 'DISCUSSION_1', knownClues: [], emotionalState: '平静' }, scenario.characters, toScenarioPublic(scenario));
+check('C7: NPC X prompt for player B does not surface A private line', !promptForB.includes(SENTINEL_A));
+check('C7: group chat history holds only public lines, not A private line', JSON.stringify(roomAfterPrivate.groupChatHistory).includes('PUBLIC-GROUP-LINE') && !JSON.stringify(roomAfterPrivate.groupChatHistory).includes(SENTINEL_A));
+check('C7: A own isolated thread still retains the line (what A sees / feeds A history)', JSON.stringify(roomAfterPrivate.privateChats[threadKeyAX]).includes(SENTINEL_A));
+
+// C7 secondary (KI-015): appendConversation labels speaker + channel + the real round.
+const labeled = appendConversation(initializeMemory(npcX), { role: 'player', content: 'hi', characterId: npcX.id, speakerName: '张三', channel: 'group', round: 3 });
+check('C7: appendConversation labels [群聊] speaker + records the real round', labeled.conversations[0].summary === '[群聊] 张三: hi' && labeled.conversations[0].round === 3);
+const legacy = appendConversation(initializeMemory(npcX), { role: 'player', content: 'hi', characterId: npcX.id });
+check('C7: appendConversation stays backward-compatible without labels', legacy.conversations[0].summary === '玩家: hi' && legacy.conversations[0].round === 0);
+
+// C10 (KI-021): shared memory growth is bounded via offline-safe compaction.
+let growingX = initializeMemory(npcX);
+for (let i = 0; i < 25; i += 1) {
+  growingX = appendConversation(growingX, { role: 'npc', content: `line-${i}`, characterId: npcX.id, speakerName: npcX.name, channel: 'group', round: 1 });
+}
+check('C10 setup: unbounded group appends grow past the threshold', growingX.conversations.length === 25);
+const compactedX = await compactConversationsIfNeeded(growingX, 20);
+check('C10: compaction bounds the shared conversation array', compactedX.conversations.length < growingX.conversations.length && compactedX.conversations.length <= 20);
+check('C10: compacted summary retains recent content (offline last-N join)', compactedX.conversations.some(item => item.summary.includes('line-24')));
+check('C10: below-threshold memory is returned unchanged (no needless rewrite)', (await compactConversationsIfNeeded(freshX, 20)) === freshX);
 
 console.log('Realtime bus:');
 const { publish, subscribe } = await import('../lib/realtime/room-bus.ts');
