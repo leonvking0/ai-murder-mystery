@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PHASE_LABELS } from '@/lib/game-engine/phase-manager';
+import { getPhaseConfig, PHASE_LABELS } from '@/lib/game-engine/phase-manager';
 import type { ChatMessage, ClueView, PlayerRoomView } from '@/types/game';
 
 export function nameMapOf(view: PlayerRoomView): Map<string, string> {
@@ -587,7 +587,15 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
   }
   const names = nameMapOf(view);
   const killerName = names.get(reveal.killerCharacterId) ?? reveal.killerCharacterId;
-  const youCorrect = view.room.youVotedFor
+  const won = reveal.outcome === 'win';
+
+  // Faction-aware banner. The killer wins by ESCAPING, so never frame their result as "指认错误".
+  const bannerTitle = reveal.youWereKiller
+    ? (won ? '你成功隐藏了身份，全身而退！' : '你的伪装被识破，未能全身而退。')
+    : (won ? '你们锁定了真凶，本局获胜！' : '真凶逃过了指认，本局落败。');
+
+  // A personal-accusation footnote only makes sense for non-killers who actually voted.
+  const youVotedCorrect = !reveal.youWereKiller && view.room.youVotedFor
     ? view.room.youVotedFor === reveal.killerCharacterId
     : undefined;
 
@@ -595,16 +603,21 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
     <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-6 backdrop-blur">
       <p className="text-xs uppercase tracking-[0.24em] text-slate-300/90">Final Reveal · 真相揭晓</p>
 
-      {typeof youCorrect === 'boolean' && (
-        <div
-          className={[
-            'mt-3 rounded-xl border px-4 py-3 text-sm',
-            youCorrect ? 'border-emerald-500/40 bg-emerald-900/20 text-emerald-100' : 'border-rose-500/40 bg-rose-900/20 text-rose-100',
-          ].join(' ')}
-        >
-          {youCorrect ? '你指认正确！' : '你指认错误。'}
-        </div>
-      )}
+      <div
+        className={[
+          'mt-3 rounded-xl border px-4 py-3',
+          won ? 'border-emerald-500/40 bg-emerald-900/20 text-emerald-100' : 'border-rose-500/40 bg-rose-900/20 text-rose-100',
+        ].join(' ')}
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] opacity-90">{won ? '胜利' : '失败'}</p>
+        <p className="mt-1 text-base font-semibold">{bannerTitle}</p>
+        {reveal.youWereKiller && (
+          <p className="mt-1 text-xs opacity-80">你就是本案的真凶。</p>
+        )}
+        {typeof youVotedCorrect === 'boolean' && (
+          <p className="mt-1 text-xs opacity-80">{youVotedCorrect ? '你的指认正确。' : '你的个人指认与真凶不符。'}</p>
+        )}
+      </div>
 
       <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3">
         <p className="text-sm text-amber-100/90">真凶</p>
@@ -644,7 +657,13 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
 
 // ---------- Notebook ----------
 
-export function Notebook({ view }: { view: PlayerRoomView }) {
+export function Notebook({
+  view,
+  onPresent,
+}: {
+  view: PlayerRoomView;
+  onPresent?: (clueId: string) => void;
+}) {
   const clues: ClueView[] = useMemo(() => {
     const byId = new Map<string, ClueView>();
     for (const clue of view.room.publicClues) {
@@ -656,6 +675,14 @@ export function Notebook({ view }: { view: PlayerRoomView }) {
     return [...byId.values()];
   }, [view.room.publicClues, view.room.yourClues]);
 
+  // A clue already in the shared pool is public to everyone; presenting it again is a no-op.
+  const publicIds = useMemo(
+    () => new Set(view.room.publicClues.map(clue => clue.id)),
+    [view.room.publicClues],
+  );
+  // Presenting a clue is a discussion act — only offer it while chat is allowed.
+  const canPresent = getPhaseConfig(view.room.currentPhase).allowsChat;
+
   return (
     <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
       <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Notebook · 线索笔记</p>
@@ -665,15 +692,33 @@ export function Notebook({ view }: { view: PlayerRoomView }) {
         </p>
       ) : (
         <div className="mt-3 space-y-2">
-          {clues.map(clue => (
-            <div key={clue.id} className="rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm">
-              <p className="text-slate-100">{clue.content}</p>
-              <p className="mt-1 text-xs text-slate-400">
-                {clue.type === 'public' ? '公共线索' : '私密线索'}
-                {clue.foundAt ? ` · ${clue.foundAt}` : ''}
-              </p>
-            </div>
-          ))}
+          {clues.map(clue => {
+            const isPublic = publicIds.has(clue.id);
+            return (
+              <div key={clue.id} className="rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm">
+                <p className="text-slate-100">{clue.content}</p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <p className="text-xs text-slate-400">
+                    {clue.type === 'public' ? '公共线索' : '私密线索'}
+                    {clue.foundAt ? ` · ${clue.foundAt}` : ''}
+                  </p>
+                  {isPublic ? (
+                    <span className="shrink-0 text-xs text-emerald-300/80">已公开</span>
+                  ) : (
+                    onPresent && canPresent && (
+                      <button
+                        type="button"
+                        onClick={() => onPresent(clue.id)}
+                        className="shrink-0 rounded-md border border-amber-500/50 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/30"
+                      >
+                        出示
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </aside>

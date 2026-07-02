@@ -319,6 +319,10 @@ export interface RevealInfo {
   tally: { characterId: string; votes: number }[];
   accusedCharacterId: string | null; // most-voted character (null if no votes / tie)
   groupCorrect: boolean; // did the group's majority accuse the killer
+  youWereKiller: boolean; // did the requesting player play the killer
+  // Faction outcome for the requesting player: the killer wins by ESCAPING (group wrong); everyone
+  // else wins by catching the killer (group correct). See buildReveal for the truth table.
+  outcome: 'win' | 'loss';
 }
 
 // What a single player is allowed to see.
