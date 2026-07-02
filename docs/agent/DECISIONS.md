@@ -142,3 +142,51 @@ growth is bounded by `summarizeConversations` compaction past a threshold.
 player's private thread supplied per-request — never cross-pollinated. Voting/pure helpers that tests
 load must remain strip-types-loadable, so shared pure vote/tally helpers live in `projection.ts` (not
 `room-engine.ts`, whose `@/`-value import chain the strip-types test runner can't resolve).
+
+## 2026-07-02 — Disconnect takeover + host handoff via SSE-refcount presence — Accepted
+**Context:** A player who closed their tab left a dead seat; if the host left, the room bricked (only the host
+can advance). The prior `Player.connected` was never authoritatively driven. Separately, the projection shipped
+the host's real `hostPlayerId` (a seat auth credential) in `PlayerRoomView.room` — a latent KI-034-class leak,
+though the client only used `isHost`.
+**Decision:** SSE `/events` maintains an in-process **per-(room,player) connection refcount** (`markConnected`/
+`markDisconnected`, keyed `roomId::playerId`, hung off `globalThis` for HMR): only the 0↔1 boundary flips
+`Player.connected` + stamps **server-only** `disconnectedAt`/`lastSeenAt`, so multi-tab / reconnect overlap never
+false-toggles presence. A seat whose human has been disconnected ≥ `SEAT_TAKEOVER_IDLE_MS` (90s) is handed to an
+NPC seeded with a fresh `initializeMemory` + the room's **public-clue content only** (never `significance`, never
+the departed human's private clues); the host role auto-transfers to the earliest-joined connected human; a
+returning human **reclaims** their seat on reconnect. The sweep runs opportunistically inside the group-chat
+per-room lock (no cron). The pure selectors (`seatsToTakeOver`/`reassignHost`) live in `projection.ts` (strip-
+types-loadable, offline-tested); the scenario-aware mutation (`takeOverSeatAsNpc`) lives in `room-engine.ts`.
+The projection now ships `hostPublicId` (render id) instead of `hostPlayerId`, and `PublicPlayer.controlledByNpc`;
+the npc `CharacterControl` arm carries a server-only `takenOverFromPlayerId` used only for reveal attribution.
+**Consequences:** Presence is best-effort (in-process; a multi-container deploy would need shared state). Takeover
+NPC memory is intentionally public-only, so a taken-over seat can't voice the departed human's private clues.
+`hostPlayerId` never leaves the server again.
+
+## 2026-07-02 — NPC emotion/suspicion is rule-based and strictly server-side — Accepted
+**Context:** `CharacterMemory.suspicions`/`emotionalState` (KI-010) were seeded once and only read into the
+prompt — the "怀疑度/情绪 drives behavior" design was inert.
+**Decision:** Pure, offline-tested helpers (`deriveGroupTurnReaction`/`applyGroupTurnReaction` in
+`memory-manager.ts`) detect an accusation (the trigger names the NPC **and** contains an accusation keyword),
+bump suspicion toward the accuser — keyed by **character id, never `player.id`** — and flip emotion to a cornered
+label, with a one-notch de-escalation ladder on benign turns. The group-chat `case 'done'` handler folds this
+into `characterMemories` (guarded so a nudge never bumps suspicion); `npc-base` renders the NPC's own suspicions
+(self filtered out) + static cornered-defense guidance into the prompt. These signals **never** get a projection
+field, RoomEvent, or client surface — they are NPC-internal LLM input only (a serialize-scan regression test
+asserts a seeded emotion/suspicion sentinel never appears in `projectRoomForPlayer`).
+**Consequences:** Suspicion reason strings must always be our own generated text (never sourced from another
+character's secrets) so a prompt echo can't leak them. Emotion labels are free-text (read verbatim by
+`npc-voter`), so any label is safe.
+
+## 2026-07-02 — VOTING is a concurrent defense round; reveal ballots are keyed by character — Accepted
+**Context:** VOTING had `allowsChat:false` (no debate), and the reveal exposed only an aggregate tally. A
+per-ballot breakdown risked leaking playerIds (human votes are keyed by `playerId`, NPC votes by `npc:<id>`).
+**Decision:** Flip `PHASE_CONFIGS.VOTING.allowsChat` to `true` — the single unified gate opens chat + NPC
+responses + present-clue during VOTING, so a defense round runs **concurrently** with balloting (votes stay
+changeable until the host advances; no separate "argue-then-lock" sub-state — deferred). `buildReveal` adds
+`RevealInfo.ballots` keyed strictly by **character**: `npc:<id>` → the character id; a human `playerId` key is
+resolved to their character via `assignedCharacterId` / `human` characterControl, and **dropped** if it maps to
+nothing — a raw playerId can never enter a ballot (a taken-over seat still resolves via its `assignedCharacterId`).
+The staged reveal is pure client-side progressive disclosure (no server pacing / new events).
+**Consequences:** Because chat is open in VOTING, present-clue + private-chat are also available there (same gate)
+— intended. The ballots isolation guarantee is covered by a dedicated regression test incl. the taken-over-seat case.

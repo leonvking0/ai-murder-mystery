@@ -20,12 +20,14 @@ by the room system, which fixed most findings at the root. Detailed per-item sta
   KI-018 (server-external set; security headers still TODO), KI-019/KI-028 (validation runs at startup
   via registry; standalone script + stronger checks still TODO), KI-026 (new client surfaces an error
   banner; can go deeper).
-- **⬜ Still open (carried forward):** KI-009 (NPC maxOutputTokens still 5000), KI-010 (suspicion/emotion
-  inert), KI-011 (player-found clues not injected into NPC memory), KI-013 (NPCs don't vote — by design
-  for now), KI-015 (`round:0`), KI-016 (room path doesn't summarize long memories yet), KI-023
-  (**no rate limit / auth beyond playerId possession — still important before public hosting**), KI-027
-  (LLM failures swallowed; no SSE error surfaced), KI-030/KI-031 (content bugs), KI-032 (phase engine
-  ignores `scenario.phases`).
+- **✅ Fixed in Batch D (PRs #12–#19):** KI-010 (suspicion/emotion now updated on accusation + fed back into
+  the prompt, server-only). Batch D also added disconnect/host-handoff (D2, closing the "host closes tab =
+  bricked" gap + a latent `hostPlayerId` leak), NPC cross-talk, a VOTING defense round + per-ballot reveal,
+  investigation prerequisite chains, and the always-on case/script drawer.
+- **⬜ Still open (carried forward):** KI-009 (NPC maxOutputTokens still 5000), KI-023 (**no rate limit / auth
+  beyond seat cookie — still important before public hosting**), KI-027 (LLM failures swallowed; no SSE error
+  surfaced), KI-030/KI-031 (content bugs), KI-032 (phase engine ignores `scenario.phases`). *(KI-011/013/015/016
+  were fixed in Batches B–C.)*
 
 New follow-ups worth filing: human↔human private chat, NPC voting, reconnect hardening (signed cookie),
 prompt-caching for cost, per-phase min-participation gates. See `design/multiplayer-rooms.md` "deferred".
@@ -131,12 +133,14 @@ prompt-caching for cost, per-phase min-participation gates. See `design/multipla
 - **Impact:** Wasteful ceiling; the "prevent hallucination" rationale (commit `59ed493`) is incorrect.
 - **Fix:** Lower to a sane bound (e.g. 300–600) for chat; keep summaries small.
 
-### KI-010 · Suspicion/emotion modeled but never updated or used · design · open
-- **Where:** `memory-manager.ts` `updateSuspicion` (unused); `CharacterMemory.suspicions` /
-  `emotionalState` set once in `initializeMemory` and only read into the prompt.
-- **Impact:** NPC psychology is static; the "怀疑度/情绪 drives behavior" design is inert.
-- **Fix:** Update suspicion/emotion from conversation/clue events and feed deltas back, or remove the
-  fields to reduce dead surface.
+### KI-010 · Suspicion/emotion modeled but never updated or used · design · ✅ fixed (PR #15 logic/prompt + #17 route)
+- **Was:** `memory-manager.ts` `updateSuspicion` unused; `CharacterMemory.suspicions` / `emotionalState` set
+  once in `initializeMemory` and only read into the prompt → NPC psychology static.
+- **Fix (D4):** `deriveGroupTurnReaction`/`applyGroupTurnReaction` (pure, offline-tested) bump suspicion toward
+  an accuser (name + accusation-keyword match; keyed by **character id**, never playerId) and flip emotion to a
+  cornered label, with a de-escalation ladder on benign turns; the group-chat `case 'done'` handler folds this
+  into `characterMemories`, and `npc-base` renders own-suspicions + a cornered-defense guidance block. Kept
+  strictly **server-side** (no projection field / RoomEvent / client surface; serialize-scan regression test).
 
 ### KI-011 · NPCs can't react to player-found clues or to each other mid-turn · design · ✅ fixed (PR #5 present-clue + PR #10 in-turn context rebuild)
 - **Where:** `group-chat-manager.ts:74-107` builds one `groupContext` snapshot before the turn; private

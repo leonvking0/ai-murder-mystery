@@ -2,6 +2,42 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-02 — Backlog Batch D (gameplay depth) IMPLEMENTED & MERGED
+
+**State:** Green on `main` @ `008f551`. `npm test` = **261 checks** (info-isolation 112 + gameplay-chat 51 +
+gameplay-reveal 98), tsc/eslint clean, authoritative Turbopack `npm run build` ✓ on the integrated main.
+
+**What landed (8 PRs #12–#19, multi-agent orchestration — opus-4.8 workers in git worktrees, orchestrator
+audited every diff for the isolation invariant + squash-merged; three sequential waves, every file single-owned
+per wave):**
+- **Wave 1 (4 parallel, file-disjoint):**
+  - **PR #12** — D2 presence/takeover/host-handoff + the batch scaffolding (types/room-bus/projection contract).
+    SSE-refcount presence; idle-90s seat→NPC (public-clue content only, never significance/private clues); host
+    auto-transfer; seat reclaim on reconnect. **Fixed a latent leak**: `hostPlayerId`→`hostPublicId`.
+  - **PR #13** — D3 NPC cross-talk (capped in-turn pull-in queue) + D5(a) VOTING `allowsChat=true`.
+  - **PR #14** — D6 fuzzy find-hint + `Clue.prerequisite` gating + acyclic schema validation.
+  - **PR #15** — D4 emotion/suspicion logic (memory-manager helpers) + prompt rendering, **server-only**.
+- **Wave 2 (2 parallel, rebased on Wave 1):**
+  - **PR #16** — D5(b) per-ballot reveal tally, keyed by **character** (human playerId keys resolved-or-dropped;
+    taken-over seats resolve via `assignedCharacterId` — a raw playerId can never enter a ballot).
+  - **PR #17** — D4 route wiring: `applyGroupTurnReaction` in group-chat `case 'done'`, nudge-guarded, accuser =
+    character id.
+- **Wave 3 (sequenced — the `GroupChatPanel.onNudge` contract couples the two FE files):**
+  - **PR #18** — RoomPanels: staged RevealRoom + per-ballot list + per-character recap; roster presence dots +
+    `AI 接管` chip; new exported `Roster`; nudge button/idle-timer (optional `onNudge`); locked-clue note.
+  - **PR #19** — RoomClient + new `CaseFileDrawer` (D1): drawer mount (gated `inProgress && !REVEAL`); `Roster`
+    mount; presence/seat_takeover/host_change SSE handlers; `sendNudge`; VOTING defense-round chat grid.
+
+**KI closed:** KI-010 (emotion/suspicion now updated + fed back). **Isolation audited every merge:** emotion/
+suspicion stay in `characterMemories` (serialize-scan proves absent from projection); no real playerId in any
+projection/SSE/ballot; `hostPlayerId` leak closed; drawer private data only from `view.yourCharacter`.
+
+**Deferred (small):** D5 "argue-then-lock" ballot sub-state (current = concurrent chat+ballot, changeable until
+host advances); D6 per-location `lockedCount` UX (Option A shipped = static note only); nudge throttle has no
+client feedback when the server silently swallows a cooled-down nudge. All Batch E/F candidates.
+
+**Next up:** Batch E (robustness lows & housekeeping) or Batch F (content & reach). See BACKLOG.md.
+
 ## Snapshot — 2026-07-02 — Backlog Batch C (robustness) IMPLEMENTED & MERGED
 
 **State:** Green on `main` @ f9da7fc. `npm test` = **156 checks** (info-isolation 57 + gameplay-chat 37 +
