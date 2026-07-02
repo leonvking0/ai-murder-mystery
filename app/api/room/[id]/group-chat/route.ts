@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { manageRoomGroupResponse } from '@/lib/agents/room-group-chat';
-import { appendConversation, compactConversationsIfNeeded } from '@/lib/game-engine/memory-manager';
+import { appendConversation, applyGroupTurnReaction, compactConversationsIfNeeded } from '@/lib/game-engine/memory-manager';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { applyDisconnectTakeovers, reassignHostIfNeeded, SEAT_TAKEOVER_IDLE_MS } from '@/lib/game-engine/room-engine';
 import { getAuthedPlayerId } from '@/lib/room/auth';
@@ -184,6 +184,19 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
                     role: 'npc', content: trimmed, characterId,
                     speakerName: npcSpeakerName, channel: 'group', round: current.round,
                   });
+                  // D4 (KI-010): fold this group turn into the NPC's internal emotion/suspicion signals.
+                  // Guarded on a non-empty human line — a nudge (empty `message`) has no accuser, so we
+                  // never bump suspicion or touch emotion on it. `accuserCharacterId` is the human's
+                  // CHARACTER id, NEVER `player.id` (a real player id must never enter an NPC record).
+                  // These signals stay server-only: no projection field / RoomEvent / SSE publish is added.
+                  if (message) {
+                    nextMemory = applyGroupTurnReaction(nextMemory, {
+                      selfName: npcSpeakerName,
+                      triggerText: message,
+                      accuserCharacterId: player.assignedCharacterId,
+                      accuserName: humanSpeakerName,
+                    });
+                  }
                 }
                 return {
                   ...current,

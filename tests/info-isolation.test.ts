@@ -166,7 +166,7 @@ check('prompt hides non-public timeline event', !npcPrompt.includes('SECRET-EVEN
 check('prompt includes own private script', npcPrompt.includes('SECRET-SCRIPT-K'));
 
 console.log('C7 private-chat memory isolation (KI-039) + labeling (KI-015) + C10 memory bounds (KI-021):');
-const { initializeMemory, appendConversation, compactConversationsIfNeeded } = await import('../lib/game-engine/memory-manager.ts');
+const { initializeMemory, appendConversation, compactConversationsIfNeeded, updateSuspicion, setEmotionalState, deriveGroupTurnReaction, applyGroupTurnReaction } = await import('../lib/game-engine/memory-manager.ts');
 
 const npcX = scenario.characters[1]; // 'other' — an NPC a player privately chats with
 const SENTINEL_A = 'ALPHA-PRIVATE-SENTINEL-9f3a2'; // player A's private line to NPC X — must never leak
@@ -221,6 +221,94 @@ const compactedX = await compactConversationsIfNeeded(growingX, 20);
 check('C10: compaction bounds the shared conversation array', compactedX.conversations.length < growingX.conversations.length && compactedX.conversations.length <= 20);
 check('C10: compacted summary retains recent content (offline last-N join)', compactedX.conversations.some(item => item.summary.includes('line-24')));
 check('C10: below-threshold memory is returned unchanged (no needless rewrite)', (await compactConversationsIfNeeded(freshX, 20)) === freshX);
+
+console.log('D4 emotion + group-turn suspicion (KI-010):');
+// updateSuspicion — clamp to [0,10], append reasons to an existing record, create a record when absent.
+const suspFresh = initializeMemory(npcX); // 'other' has no relationships → suspicions start empty
+check('D4 setup: fresh memory has no suspicions', suspFresh.suspicions.length === 0);
+const suspNew = updateSuspicion(suspFresh, 'killer', 4, 'REASON-NEW');
+const suspNewRec = suspNew.suspicions.find(r => r.characterId === 'killer');
+check('D4 updateSuspicion creates a record for an absent target', Boolean(suspNewRec) && suspNewRec!.level === 4 && suspNewRec!.reasons.includes('REASON-NEW'));
+const suspAppend = updateSuspicion(suspNew, 'killer', 2, 'REASON-2');
+const suspAppendRec = suspAppend.suspicions.find(r => r.characterId === 'killer');
+check('D4 updateSuspicion appends the reason to an existing record (and adds to level)', suspAppendRec!.reasons.length === 2 && suspAppendRec!.reasons.includes('REASON-NEW') && suspAppendRec!.reasons.includes('REASON-2') && suspAppendRec!.level === 6);
+check('D4 updateSuspicion clamps a new record up to 10', updateSuspicion(suspFresh, 'killer', 999, 'HI').suspicions.find(r => r.characterId === 'killer')!.level === 10);
+check('D4 updateSuspicion clamps an existing record up to 10', updateSuspicion(suspAppend, 'killer', 999, 'MORE').suspicions.find(r => r.characterId === 'killer')!.level === 10);
+check('D4 updateSuspicion clamps an existing record down to 0', updateSuspicion(suspNew, 'killer', -999, 'LOW').suspicions.find(r => r.characterId === 'killer')!.level === 0);
+
+// setEmotionalState — new memory on change, SAME ref (no-op) when unchanged.
+const emoBase = initializeMemory(npcX);
+const emoSet = setEmotionalState(emoBase, '慌乱');
+check('D4 setEmotionalState returns a new memory carrying the given state', emoSet.emotionalState === '慌乱' && emoSet !== emoBase);
+check('D4 setEmotionalState is a no-op (same ref) when the state is unchanged', setEmotionalState(emoBase, emoBase.emotionalState) === emoBase);
+
+// deriveGroupTurnReaction — cornered on a naming accusation, null on benign/empty text.
+const accusationText = `我怀疑${npcX.name}就是凶手`;
+const reaction = deriveGroupTurnReaction({ selfName: npcX.name, triggerText: accusationText, accuserCharacterId: 'killer', accuserName: 'K' });
+check('D4 deriveGroupTurnReaction corners the NPC on a naming accusation (delta>0, flustered state)', reaction !== null && reaction!.cornered === true && reaction!.suspicionDelta > 0 && reaction!.emotionalState === '慌乱');
+check('D4 deriveGroupTurnReaction reason names the accuser (public display name only)', reaction!.suspicionReason.includes('K'));
+check('D4 deriveGroupTurnReaction returns null on benign text', deriveGroupTurnReaction({ selfName: npcX.name, triggerText: '今天天气不错啊', accuserName: 'K' }) === null);
+check('D4 deriveGroupTurnReaction returns null on empty text', deriveGroupTurnReaction({ selfName: npcX.name, triggerText: '', accuserName: 'K' }) === null);
+check('D4 deriveGroupTurnReaction returns null when the NPC is named without an accusation keyword', deriveGroupTurnReaction({ selfName: npcX.name, triggerText: `${npcX.name}你好啊`, accuserName: 'K' }) === null);
+
+// applyGroupTurnReaction end-to-end — raises the accuser's suspicion + flips emotion; benign turn
+// de-escalates emotion one notch toward the baseline and leaves suspicion untouched.
+const applied = applyGroupTurnReaction(initializeMemory(npcX), { selfName: npcX.name, triggerText: accusationText, accuserCharacterId: 'killer', accuserName: 'K' });
+const appliedRec = applied.suspicions.find(r => r.characterId === 'killer');
+check('D4 applyGroupTurnReaction raises the accuser suspicion level', Boolean(appliedRec) && appliedRec!.level > 0);
+check('D4 applyGroupTurnReaction flips emotionalState to the cornered state', applied.emotionalState === '慌乱' && applied.emotionalState !== initializeMemory(npcX).emotionalState);
+check('D4 applyGroupTurnReaction records the accuser CHARACTER id (never a player id)', applied.suspicions.every(r => r.characterId === 'killer'));
+const cornered = setEmotionalState(initializeMemory(npcX), '慌乱');
+const deescalated = applyGroupTurnReaction(cornered, { selfName: npcX.name, triggerText: '大家先冷静一下', accuserCharacterId: 'killer', accuserName: 'K' });
+check('D4 applyGroupTurnReaction de-escalates emotion one notch on a benign turn', deescalated.emotionalState === '戒备');
+check('D4 applyGroupTurnReaction does not raise suspicion on a benign turn', deescalated.suspicions.length === 0);
+check('D4 applyGroupTurnReaction steps emotion back to the calm baseline on a further benign turn', applyGroupTurnReaction(deescalated, { selfName: npcX.name, triggerText: '继续说吧', accuserName: 'K' }).emotionalState === '警惕');
+
+// buildNPCSystemPrompt renders the NPC's OWN suspicions + cornered-defense guidance, filters self.
+const SUSPICION_SENTINEL = 'SUSPICION-REASON-SENTINEL-7c1d9';
+const SELF_SUSPICION_SENTINEL = 'SELF-SUSPICION-SHOULD-NOT-RENDER-3e8f1';
+const suspicionMemory = {
+  characterId: 'killer', privateScript: 'SECRET-SCRIPT-K', publicProfile: 'pub', objectives: [],
+  conversations: [], discoveredClues: [], knownFacts: [],
+  suspicions: [
+    { characterId: 'other', level: 7, reasons: [SUSPICION_SENTINEL] }, // toward another character → rendered
+    { characterId: 'killer', level: 9, reasons: [SELF_SUSPICION_SENTINEL] }, // self → must be filtered out
+  ],
+  emotionalState: '慌乱',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const suspicionPrompt = buildNPCSystemPrompt(
+  scenario.characters[0], // the killer
+  suspicionMemory,
+  { phase: 'DISCUSSION_1', knownClues: [], emotionalState: '慌乱' },
+  scenario.characters,
+  toScenarioPublic(scenario),
+);
+check('D4 prompt has the 你此刻的怀疑 section', suspicionPrompt.includes('你此刻的怀疑'));
+check('D4 prompt renders the seeded suspicion reason', suspicionPrompt.includes(SUSPICION_SENTINEL));
+check('D4 prompt renders the cornered-defense guidance', suspicionPrompt.includes('越被逼到墙角越要辩得凶'));
+check('D4 prompt never renders a self-suspicion', !suspicionPrompt.includes(SELF_SUSPICION_SENTINEL));
+check('D4 prompt still hides the solution + another character secrets', !suspicionPrompt.includes('SECRET-TRUTH') && !suspicionPrompt.includes('SECRET-SCRIPT-O') && !suspicionPrompt.includes('SECRET-2') && !suspicionPrompt.includes('SECRET-SIGNIFICANCE') && !suspicionPrompt.includes('SECRET-EVENT'));
+
+// Isolation lock — emotion/suspicion are NPC-internal + SERVER-ONLY: they must NEVER reach a client.
+// Seed a room's characterMemories with distinctive sentinels, then serialize-scan the whole projection.
+const EMOTION_SENTINEL = 'EMOTION-STATE-SENTINEL-4b8e2';
+const SUSPICION_LOCK_SENTINEL = 'SUSPICION-LOCK-SENTINEL-1a2b3';
+const memRoom = {
+  ...playing,
+  characterMemories: {
+    killer: {
+      characterId: 'killer', privateScript: 'SECRET-SCRIPT-K', publicProfile: 'pub', objectives: [],
+      conversations: [], discoveredClues: [], knownFacts: [],
+      suspicions: [{ characterId: 'other', level: 8, reasons: [SUSPICION_LOCK_SENTINEL] }],
+      emotionalState: EMOTION_SENTINEL,
+    },
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const memBlob = JSON.stringify(projectRoomForPlayer(memRoom, scenario, playerId));
+check('D4 isolation: NPC emotionalState never reaches a client projection', !memBlob.includes(EMOTION_SENTINEL));
+check('D4 isolation: NPC suspicion reason never reaches a client projection', !memBlob.includes(SUSPICION_LOCK_SENTINEL));
 
 console.log('Realtime bus:');
 const { publish, subscribe, markConnected, markDisconnected } = await import('../lib/realtime/room-bus.ts');
