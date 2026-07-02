@@ -24,10 +24,10 @@ by the room system, which fixed most findings at the root. Detailed per-item sta
   the prompt, server-only). Batch D also added disconnect/host-handoff (D2, closing the "host closes tab =
   bricked" gap + a latent `hostPlayerId` leak), NPC cross-talk, a VOTING defense round + per-ballot reveal,
   investigation prerequisite chains, and the always-on case/script drawer.
-- **⬜ Still open (carried forward):** KI-009 (NPC maxOutputTokens still 5000), KI-023 (**no rate limit / auth
-  beyond seat cookie — still important before public hosting**), KI-027 (LLM failures swallowed; no SSE error
-  surfaced), KI-030/KI-031 (content bugs), KI-032 (phase engine ignores `scenario.phases`). *(KI-011/013/015/016
-  were fixed in Batches B–C.)*
+- **⬜ Still open (carried forward):** KI-023 (**no rate limit / auth beyond seat cookie — still important before
+  public hosting**; note Batch E added per-IP limits on `join` + `resolve`), KI-030/KI-031 (content bugs → Batch F1),
+  KI-032/KI-057 (phase engine ignores `scenario.phases`; hardcoded flavor → Batch F4). *(KI-009/011/013/015/016/028/
+  033/052/053/054/055/056/059/060/062 were fixed in Batches B–E; KI-027 addressed by KI-044/059.)*
 
 New follow-ups worth filing: human↔human private chat, NPC voting, reconnect hardening (signed cookie),
 prompt-caching for cost, per-phase min-participation gates. See `design/multiplayer-rooms.md` "deferred".
@@ -128,7 +128,7 @@ prompt-caching for cost, per-phase min-participation gates. See `design/multipla
 - **Fix:** Verify current ids via the `claude-api` skill; update to a current Claude model
   (e.g. the latest Sonnet) and a valid Gemini id; reconcile README. Consider env-overridable model ids.
 
-### KI-009 · `maxOutputTokens: 5000` for 1–3 sentence replies · perf/cost · open
+### KI-009 · `maxOutputTokens: 5000` for 1–3 sentence replies · perf/cost · ✅ fixed (PR #23 / E4 — now 500; see KI-060)
 - **Where:** `lib/agents/npc-agent.ts:73,116`.
 - **Impact:** Wasteful ceiling; the "prevent hallucination" rationale (commit `59ed493`) is incorrect.
 - **Fix:** Lower to a sane bound (e.g. 300–600) for chat; keep summaries small.
@@ -171,8 +171,9 @@ Remove it, or use it for KI-002. (`package.json`)
 ### KI-015 · `appendConversation` always stamps `round: 0` · bug(minor) · ✅ fixed (PR #10 — real round + speaker/channel label)
 `memory-manager.ts:36` — round context is lost from conversation summaries.
 
-### KI-016 · `summarizeConversations` can append summary facts repeatedly · perf(minor) · open
-`chat/route.ts:116-123` re-triggers each time conversations re-cross 10, growing `knownFacts`.
+### KI-016 · `summarizeConversations` can append summary facts repeatedly · perf(minor) · ✅ fixed (PR #10 / C10; see KI-058)
+The old single-player `chat/route.ts` path is gone; the room path uses `compactConversationsIfNeeded` (collapses
+to one `[记忆摘要]` entry past 20, offline-safe) + a 16-message private-chat model-input cap — no repeated growth.
 
 ### KI-017 · No tests, no `typecheck` script · maintainability · 🟡 in progress (2026-06-30)
 > Done: `npm run typecheck` (`tsc --noEmit`) + `npm test` scripts; `tests/info-isolation.test.ts`
@@ -247,7 +248,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Differentiate "not configured" vs "request failed"; surface an SSE `error` event to the
   client; log the real error. Pairs with KI-008 (bad model id is exactly this failure).
 
-### KI-028 · `validateScenario` is too weak to catch real scenario bugs · maintainability/low · open
+### KI-028 · `validateScenario` is too weak to catch real scenario bugs · maintainability/low · ✅ fixed (PR #22 / E3; see KI-056)
 - **Where:** `lib/scenarios/schema.ts` checks types/lengths but not: exactly-one/at-least-one killer
   consistency for play, **clue id uniqueness**, or referential integrity (relationship/timeline
   `characterId`s, clue→location). It's also dead at runtime (KI-005, KI-019).
@@ -280,7 +281,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Drive the flow from `scenario.phases` (data-driven), or delete the unused scenario `phases`
   + `duration` to stop implying configurability. De-duplicate the round mapping.
 
-### KI-033 · `AGENTS.md` tech stack is stale and will mislead agents · maintainability/nit · open
+### KI-033 · `AGENTS.md` tech stack is stale and will mislead agents · maintainability/nit · ✅ fixed (PR #25 / E7)
 - **Where:** `AGENTS.md:13-16` still says `@anthropic-ai/sdk` + SQLite/Drizzle; the code uses the Vercel
   AI SDK and an in-memory Map. An agent following AGENTS.md will write conflicting code.
 - **Fix:** Update AGENTS.md to match reality (point to `docs/agent/ARCHITECTURE.md` as the as-built
@@ -482,27 +483,34 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   professor "在旧案话题上态度谨慎", drop "不干净的历史").
 
 ### Low-severity register (2026-07-01, confirmed) — fix opportunistically
-- **KI-052** SSE cleanup relies solely on `req.signal` abort; `ReadableStream` has no `cancel()`, enqueue
-  failures don't trigger cleanup → leaked emitter listener + 25s heartbeat interval per half-open conn
-  (`events/route.ts:57`).
-- **KI-053** `rooms.ts:11` db handle is a module `let` not on `globalThis` → dev HMR leaks unclosed
-  better-sqlite3 connections (prod unaffected; inconsistent with room-bus HMR strategy).
-- **KI-054** `finished` rooms are never deleted; no TTL → unbounded SQLite growth (`rooms.ts:146`).
-- **KI-055** `resolve/[code]` is public + unthrottled; 31^5 code space enumerable to find live rooms
-  (`resolve/[code]/route.ts:10`).
-- **KI-056** (= KI-028) startup validation is weak: no clue-id uniqueness, no "exactly one killer", no
-  `availableInRound` range / referential-integrity checks (`schema.ts:65`).
+- **KI-052** ✅ fixed (PR #21 / E1) SSE cleanup relied solely on `req.signal` abort; `ReadableStream` had no
+  `cancel()` → leaked emitter listener + 25s heartbeat per half-open conn. `cancel()` now runs the same hoisted,
+  idempotent cleanup (`events/route.ts`).
+- **KI-053** ✅ fixed (PR #21 / E1) db handle moved from a module `let` to `globalThis.__roomsDb` (mirrors
+  room-bus) → dev HMR no longer leaks unclosed better-sqlite3 connections (`rooms.ts`).
+- **KI-054** ✅ fixed (PR #21 / E2) `pruneFinishedRooms` (`ROOM_TTL_MS`, 24h default) sweeps finished rooms past
+  the TTL, run ≤ once/hour in `createRoom`; never touches lobby/in_progress (`rooms.ts`).
+- **KI-055** ✅ fixed (PR #21 / E2) per-IP sliding-window limit (30/60s) → 429 on the public `resolve/[code]`,
+  so the code space can't be enumerated to discover live rooms (`resolve/[code]/route.ts`).
+- **KI-056** (= KI-028) ✅ fixed (PR #22 / E3) `validateScenario` now enforces exactly-one-killer, integer
+  `availableInRound` ≥ 1, and relationship `characterId` referential integrity; clue-id uniqueness + acyclic
+  prereqs were already added by D6. Covered by `tests/scenario-validation.test.ts` (`schema.ts`).
 - **KI-057** (= KI-032) phase text hardcodes storm-mansion flavor; round map duplicated in 3 places, some
-  now dead (`phase-manager.ts:36`).
-- **KI-058** (= KI-016) NPC memory grows unbounded; `summarizeConversations` is dead in the room path;
-  effective memory is only the last 6 entries (`memory-manager.ts:52`).
-- **KI-059** provider/key mismatch silently degrades to canned lines (only `ANTHROPIC_API_KEY` without
-  `LLM_PROVIDER=anthropic` → all NPCs mute) (`llm-provider.ts:37`).
-- **KI-060** (= KI-009) chat replies (1-3 sentences) still allow `maxOutputTokens: 5000` (`npc-agent.ts:73`).
+  now dead (`phase-manager.ts:36`). → deferred to Batch F (F4, flow data-ization).
+- **KI-058** (= KI-016) ✅ fixed (Batch C, PR #10) shared NPC memory is compacted via `summarizeConversations`
+  past 20 entries (`compactConversationsIfNeeded`), and private-chat truncates the model input to the last 16;
+  confirmed still resolved during Batch E (E4 was the token cap only) (`memory-manager.ts`, chat routes).
+- **KI-059** ✅ fixed (PR #23 / E5) `getLLMProvider()` auto-selects the provider whose key is present when
+  `LLM_PROVIDER` is unset (an explicit value is still honored), and `streamChat` emits a one-time `console.warn`
+  on a degraded/mismatched config. The genuinely no-key case still yields the canned offline line (correct),
+  now visibly logged (`llm-provider.ts`).
+- **KI-060** (= KI-009) ✅ fixed (PR #23 / E4) `CHAT_MAX_OUTPUT_TOKENS = 500` replaces the 5000 ceiling in both
+  NPC stream calls (`npc-agent.ts`).
 - **KI-061** `state` accepts `playerId` via URL query → leaks the sole credential through logs/history/Referer
-  (`state/route.ts:11`).
-- **KI-062** `scrollIntoView` on every message/chunk forces scroll-to-bottom; can't review history mid-chat
-  (`RoomPanels.tsx:214`).
+  (`state/route.ts:11`). ✅ fixed (PR #3, folded into KI-034).
+- **KI-062** ✅ fixed (PR #24 / E6) both chat panels only auto-scroll when already near the bottom (80px),
+  tracked via a native listener on the real `ScrollArea` viewport, so history stays put while reading
+  (`RoomPanels.tsx`).
 - **KI-063** ✅ fixed (PR #9) private-chat + vote submit paths have no `catch` → phase-race 403s silently drop the message/
   vote with no feedback (`RoomPanels.tsx:346`).
 - **KI-064** ✅ fixed (PR #9) concurrent `refetchState` responses can arrive out of order and overwrite newer state (no seq

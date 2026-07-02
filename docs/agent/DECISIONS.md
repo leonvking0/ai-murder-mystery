@@ -6,6 +6,46 @@
 
 ---
 
+## 2026-07-02 — LLM provider is auto-selected from whichever key is present — Accepted
+**Context (Batch E / KI-059):** `LLM_PROVIDER` defaulted to `google`. Setting only `ANTHROPIC_API_KEY`
+without also setting `LLM_PROVIDER=anthropic` selected google with no google key, so `isLLMConfigured()`
+returned false and **every NPC silently degraded to the canned offline line** — a common, invisible footgun.
+**Decision:** When `LLM_PROVIDER` is set explicitly (`google`/`anthropic`) it is honored verbatim. When it is
+unset/blank/unrecognized, `getLLMProvider()` now **auto-selects the provider whose API key is present**
+(preferring the default, google). `streamChat` additionally emits a **one-time `console.warn`** when the
+effective config is degraded (no keys at all, or an explicitly-selected provider missing its key while the
+other provider has one). We do NOT throw and do NOT change the genuinely-no-key canned-line fallback — the
+goal is to make a mute condition visible, not to fail closed.
+**Consequences:** A single-key deployment "just works" without also setting `LLM_PROVIDER`. Behavior is
+unchanged when both keys are set (google wins) or when `LLM_PROVIDER` is explicit. Offline tests (no keys)
+still see `isLLMConfigured() === false`, preserving the summarizer/NPC no-LLM fallback paths.
+
+## 2026-07-02 — Scenario validation enforces exactly-one-killer + referential integrity — Accepted
+**Context (Batch E / KI-056):** `validateScenario` ran at startup but was weak — it only required "at least
+one" killer and didn't check `availableInRound` ranges or relationship references, so authoring mistakes
+(a stray second `isKiller`, a dangling relationship, a fractional round) could corrupt the reveal/voting at
+runtime instead of failing fast.
+**Decision:** The engine is **single-killer** today, so validation now requires **exactly one** `isKiller`
+character (0 or >1 both throw), an integer `availableInRound ≥ 1`, and that every `relationships[].characterId`
+references an existing character. (D6 already added cross-location clue-id uniqueness + acyclic prerequisites.)
+Covered by `tests/scenario-validation.test.ts` over the real `storm-mansion.json` fixture.
+**Consequences:** Bad scenarios fail at load, not mid-game. **If a future scenario needs a killer *faction*
+(accomplices), relax the exactly-one check together with the reveal/win-loss logic that currently assumes a
+single killer** (Batch F territory) — don't loosen it in isolation.
+
+## 2026-07-02 — Housekeeping conventions: globalThis singletons, TTL sweep, per-IP limits — Accepted
+**Context (Batch E / KI-052/053/054/055):** low-severity robustness gaps in the SQLite store + SSE + public
+lookup endpoint.
+**Decision:** (1) Process-singletons that must survive Next dev HMR hang off `globalThis` (the db handle
+`__roomsDb`, the prune timestamp `__roomsLastPrune`) — same pattern as `room-bus`'s emitter/conn-count maps.
+(2) `finished` rooms are swept by a TTL (`ROOM_TTL_MS`, 24h default) via `pruneFinishedRooms`, called
+opportunistically but throttled to ≤ once/hour inside `createRoom` (no cron); it never deletes lobby/in_progress.
+(3) The SSE `ReadableStream` runs its cleanup from **both** `req.signal` abort **and** the stream's `cancel()`
+(idempotent via a `closed` guard). (4) Public unauthenticated endpoints (`join`, `resolve/[code]`) carry a
+per-IP sliding-window limiter (module `Map<ip, timestamps[]>`).
+**Consequences:** No new infra/deps; all state is per-process (fine for the single-container deploy). If/when
+we scale past one container, the globalThis singletons + in-memory rate-limit maps must move to shared storage.
+
 ## 2026-06-30 — Rebuild to multiplayer rooms + play-as-character — Accepted (in progress)
 **Context:** Product owner wants friends to play together in rooms, each playing one of the cast, with
 random character assignment; deploy via Docker Compose on a VPS.
