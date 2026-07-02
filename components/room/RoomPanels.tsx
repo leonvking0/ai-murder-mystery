@@ -216,7 +216,8 @@ export function GroupChatPanel({
 }: {
   view: PlayerRoomView;
   messages: ChatMessage[];
-  streaming: { characterId: string; text: string } | null;
+  // C1: one entry per NPC currently streaming this turn (multiple can type at once).
+  streaming: { id: string; characterId: string; text: string }[];
   onSend: (message: string) => void;
 }) {
   const names = useMemo(() => nameMapOf(view), [view]);
@@ -282,16 +283,16 @@ export function GroupChatPanel({
             );
           })}
 
-          {streaming && streaming.text && (
-            <div className="flex justify-start">
+          {streaming.map(bubble => (
+            <div key={bubble.id} className="flex justify-start">
               <div className="max-w-[82%] rounded-2xl bg-slate-800/90 px-3 py-2 text-sm text-slate-100">
                 <p className="mb-0.5 text-xs font-semibold text-amber-200/90">
-                  {names.get(streaming.characterId) ?? '角色'}
+                  {names.get(bubble.characterId) ?? '角色'}
                 </p>
-                <p className="whitespace-pre-wrap">{streaming.text}</p>
+                <p className="whitespace-pre-wrap">{bubble.text || '正在输入…'}</p>
               </div>
             </div>
-          )}
+          ))}
 
           <div ref={endRef} />
         </div>
@@ -442,8 +443,12 @@ export function InvestigationRoom({
   const [result, setResult] = useState<{ locationName: string; newlyFound: ClueView[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // C8: per-phase search budget (server also enforces it — this is just UX).
+  const remaining = Math.max(0, view.room.investigationBudget - view.room.yourInvestigationsThisPhase);
+  const exhausted = remaining <= 0;
+
   const run = async () => {
-    if (!selected || busy) {
+    if (!selected || busy || exhausted) {
       return;
     }
     setBusy(true);
@@ -464,6 +469,9 @@ export function InvestigationRoom({
     <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
       <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Investigation · 第 {view.room.round} 轮搜证</p>
       <h2 className="mt-1 text-lg font-semibold text-amber-100">选择一个地点搜查</h2>
+      <p className="mt-1 text-sm text-slate-300">
+        本阶段剩余搜证次数：{remaining}/{view.room.investigationBudget}
+      </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {view.scenario.locations.map(location => (
@@ -485,8 +493,8 @@ export function InvestigationRoom({
       </div>
 
       <div className="mt-4">
-        <Button type="button" onClick={run} disabled={!selected || busy} className="bg-amber-700 text-amber-50 hover:bg-amber-600">
-          {busy ? '搜证中...' : '开始搜证'}
+        <Button type="button" onClick={run} disabled={!selected || busy || exhausted} className="bg-amber-700 text-amber-50 hover:bg-amber-600">
+          {busy ? '搜证中...' : exhausted ? '本阶段搜证已用完' : '开始搜证'}
         </Button>
       </div>
 
@@ -541,9 +549,14 @@ export function VotingRoom({
     <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
       <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Final Vote · 指认凶手</p>
       <h2 className="mt-1 text-lg font-semibold text-amber-100">你认为谁是凶手？</h2>
+      {/* C9: show human vote progress (never who-voted-for-whom) + all-voted / revote hints. */}
       <p className="mt-1 text-sm text-slate-300">
-        已投票 {view.room.voteCount}/{view.room.players.length}（投票前可随时更改）。
+        已投票 {view.room.humansVotedCount}/{view.room.connectedHumanCount}
+        {view.room.allHumansVoted ? ' · 所有人已投票' : ''}（投票前可随时更改）。
       </p>
+      {view.room.voteRevoteCount > 0 && (
+        <p className="mt-1 text-sm text-amber-200">上一轮平票，正在重新投票。</p>
+      )}
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {view.scenario.characters.map(character => (
