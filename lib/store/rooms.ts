@@ -11,11 +11,20 @@ import { dirname } from 'node:path';
 import { generatePublicId } from '../room/auth.ts';
 import type { Player, Room, RoomStatus } from '@/types/game';
 
-let db: Database.Database | null = null;
+// Survive Next dev HMR (module reloads) by hanging the db handle off globalThis, mirroring the emitter
+// registry in lib/realtime/room-bus.ts. Without this, each HMR reload leaks an unclosed better-sqlite3
+// connection (KI-053).
+const globalForDb = globalThis as unknown as {
+  __roomsDb?: Database.Database;
+  __roomsLastPrune?: number;
+};
+
+// Finished rooms are never otherwise deleted → unbounded SQLite growth (KI-054). Sweep them after a TTL.
+const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS) || 24 * 60 * 60 * 1000;
 
 function getDb(): Database.Database {
-  if (db) {
-    return db;
+  if (globalForDb.__roomsDb) {
+    return globalForDb.__roomsDb;
   }
 
   const path = process.env.DATABASE_PATH ?? './data/game.db';
@@ -34,8 +43,32 @@ function getDb(): Database.Database {
     );
   `);
 
-  db = instance;
+  globalForDb.__roomsDb = instance;
   return instance;
+}
+
+/**
+ * KI-054: delete `finished` rooms whose last update is older than the TTL. Never touches `lobby` or
+ * `in_progress` rooms. Returns the number of rows removed. Pure-ish: pass `now` for deterministic tests.
+ */
+export function pruneFinishedRooms(now = Date.now()): number {
+  const database = getDb();
+  const cutoff = now - ROOM_TTL_MS;
+  const result = database
+    .prepare(`DELETE FROM rooms WHERE status = 'finished' AND updated_at < ?`)
+    .run(cutoff);
+  return result.changes;
+}
+
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000; // opportunistic sweep at most once/hour
+
+// Run the TTL sweep opportunistically but throttled, so a DELETE isn't issued on every request.
+function maybePruneFinishedRooms(now: number): void {
+  const lastPrune = globalForDb.__roomsLastPrune ?? 0;
+  if (now - lastPrune > PRUNE_INTERVAL_MS) {
+    globalForDb.__roomsLastPrune = now;
+    pruneFinishedRooms(now);
+  }
 }
 
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no easily-confused chars
@@ -125,6 +158,7 @@ export function createRoom(input: CreateRoomInput): Room {
     updatedAt: now,
   };
 
+  maybePruneFinishedRooms(now);
   persist(room);
   return room;
 }
