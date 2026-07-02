@@ -19,6 +19,42 @@ interface ConversationEntry {
 // How many stored conversation entries the shared NPC memory may hold before it is compacted.
 const CONVERSATION_COMPACTION_THRESHOLD = 20;
 
+// ---------------------------------------------------------------------------
+// Emotion + group-turn suspicion (D4 / KI-010)
+// ---------------------------------------------------------------------------
+// These are OUR fixed labels/strings — none is ever sourced from a secret field (privateScript,
+// alibi.truth, secrets, case.truth…). emotion/suspicion are NPC-internal, server-only signals.
+//
+// Emotion de-escalation ladder, most-cornered → calm. On a group turn where the NPC is NOT accused,
+// applyGroupTurnReaction steps its emotion ONE notch toward the baseline, so a flustered NPC cools
+// down gradually instead of snapping straight back — or staying cornered forever.
+const CALM_EMOTIONAL_STATE = '警惕'; // baseline; MUST match initializeMemory's seed so it relaxes home
+const GUARDED_EMOTIONAL_STATE = '戒备'; // intermediate step on the way back down from cornered
+const CORNERED_EMOTIONAL_STATE = '慌乱'; // flustered/defensive label when the NPC is accused
+const EMOTION_DEESCALATION: Record<string, string> = {
+  [CORNERED_EMOTIONAL_STATE]: GUARDED_EMOTIONAL_STATE,
+  [GUARDED_EMOTIONAL_STATE]: CALM_EMOTIONAL_STATE,
+};
+
+// Suspicion bump applied TOWARD whoever accuses this NPC in a group turn.
+const GROUP_ACCUSATION_SUSPICION_DELTA = 2;
+
+// Accusation keywords. A group line only "corners" this NPC when it BOTH names the NPC AND contains
+// one of these. OUR list — never derived from any private script or secret.
+const ACCUSATION_KEYWORDS = [
+  '凶手',
+  '怀疑',
+  '是你',
+  '就是你',
+  '你杀',
+  '你就是',
+  '撒谎',
+  '骗人',
+  '心虚',
+  '狡辩',
+  '有问题',
+];
+
 export function initializeMemory(character: Character): CharacterMemory {
   return {
     characterId: character.id,
@@ -33,7 +69,7 @@ export function initializeMemory(character: Character): CharacterMemory {
       level: 3,
       reasons: [],
     })),
-    emotionalState: '警惕',
+    emotionalState: CALM_EMOTIONAL_STATE,
   };
 }
 
@@ -172,6 +208,106 @@ export function updateSuspicion(
       };
     }),
   };
+}
+
+// Set the NPC's internal emotional label. Immutable spread; returns the SAME reference (a no-op) when
+// the state is unchanged, so callers can cheaply skip a redundant store write.
+export function setEmotionalState(memory: CharacterMemory, state: string): CharacterMemory {
+  if (state === memory.emotionalState) {
+    return memory;
+  }
+
+  return {
+    ...memory,
+    emotionalState: state,
+  };
+}
+
+interface GroupTurnReactionParams {
+  selfName: string;
+  triggerText: string;
+  accuserCharacterId?: string;
+  accuserName?: string;
+}
+
+interface GroupTurnReaction {
+  cornered: boolean;
+  suspicionDelta: number;
+  suspicionReason: string;
+  emotionalState: string;
+}
+
+/**
+ * Decide how this NPC reacts to a single group-chat turn (D4 / KI-010). Returns `null` when the turn
+ * is empty or does NOT name/accuse this NPC. Otherwise it reports that the NPC is cornered: a positive
+ * suspicion bump aimed at the accuser, a short Chinese reason WE author (never sourced from any secret
+ * field — only the accuser's public display name is interpolated), and a flustered emotional label.
+ *
+ * Accusation = the trigger text mentions `selfName` AND contains an accusation keyword. Pure function
+ * over its params — it reads no memory and no secret.
+ */
+export function deriveGroupTurnReaction(params: GroupTurnReactionParams): GroupTurnReaction | null {
+  const triggerText = params.triggerText?.trim() ?? '';
+  const selfName = params.selfName?.trim() ?? '';
+  if (!triggerText || !selfName) {
+    return null;
+  }
+
+  const namesSelf = triggerText.includes(selfName);
+  const accuses = ACCUSATION_KEYWORDS.some(keyword => triggerText.includes(keyword));
+  if (!namesSelf || !accuses) {
+    return null;
+  }
+
+  // Accuser display names are PUBLIC (rendered to every human already); safe to weave into our reason.
+  const accuserName = params.accuserName?.trim();
+  const suspicionReason = accuserName
+    ? `${accuserName}在群聊里把矛头指向了我`
+    : '有人在群聊里把矛头指向了我';
+
+  return {
+    cornered: true,
+    suspicionDelta: GROUP_ACCUSATION_SUSPICION_DELTA,
+    suspicionReason,
+    emotionalState: CORNERED_EMOTIONAL_STATE,
+  };
+}
+
+/**
+ * The single entry point a route worker calls per group turn (D4 / KI-010). Composes
+ * deriveGroupTurnReaction + updateSuspicion (toward the accuser) + setEmotionalState.
+ *
+ * • Accused this turn → bump suspicion toward `accuserCharacterId` (a CHARACTER id — never a player
+ *   id) and flip the emotional label to the cornered state.
+ * • Not accused → step the emotion ONE notch back down the de-escalation ladder toward the calm
+ *   baseline (so an NPC does not stay '慌乱' forever); suspicions are left untouched.
+ *
+ * Returns the SAME reference when nothing changed (e.g. already calm and not accused).
+ */
+export function applyGroupTurnReaction(
+  memory: CharacterMemory,
+  params: GroupTurnReactionParams,
+): CharacterMemory {
+  const reaction = deriveGroupTurnReaction(params);
+
+  if (!reaction) {
+    const relaxed = EMOTION_DEESCALATION[memory.emotionalState] ?? CALM_EMOTIONAL_STATE;
+    return setEmotionalState(memory, relaxed);
+  }
+
+  let next = memory;
+  // Only bump suspicion when we actually know which CHARACTER accused us. accuserCharacterId is always
+  // a character id (never player.id) — the route worker is responsible for passing a character id.
+  if (params.accuserCharacterId) {
+    next = updateSuspicion(
+      next,
+      params.accuserCharacterId,
+      reaction.suspicionDelta,
+      reaction.suspicionReason,
+    );
+  }
+
+  return setEmotionalState(next, reaction.emotionalState);
 }
 
 export function addDiscoveredClue(
