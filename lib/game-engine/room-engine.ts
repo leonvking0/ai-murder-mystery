@@ -6,8 +6,13 @@ import { randomUUID } from 'node:crypto';
 import { initializeMemory } from '@/lib/game-engine/memory-manager';
 import { getNextPhase } from '@/lib/game-engine/phase-manager';
 import { generatePublicId } from '@/lib/room/auth';
-import { connectedHumanVoteState } from '@/lib/scenarios/projection';
+import { connectedHumanVoteState, reassignHost, seatsToTakeOver } from '@/lib/scenarios/projection';
 import type { CharacterControl, GamePhase, Player, Room, Scenario } from '@/types/game';
+
+// D2: how long a human's seat may sit disconnected before an NPC takes it over and (if it was the
+// host's seat) the host role is handed off. Pinned at 90s — long enough to survive a refresh/reconnect,
+// short enough that the table isn't stuck waiting on someone who left.
+export const SEAT_TAKEOVER_IDLE_MS = 90_000;
 
 function shuffle<T>(input: T[]): T[] {
   const items = [...input];
@@ -123,6 +128,78 @@ export function advanceRoom(room: Room, opts?: { force?: boolean }): Room | null
     round: roundForPhase(next, room.round),
     status: next === 'REVEAL' ? 'finished' : room.status,
   };
+}
+
+/**
+ * Hand a single seat to an NPC (D2). The seat's control becomes `{ kind: 'npc', takenOverFromPlayerId }`
+ * remembering the departed human (server-only, used only for reveal attribution). The NPC gets a FRESH
+ * memory (`initializeMemory`) seeded with the room's existing PUBLIC clues — content only, exactly like
+ * `investigateRoom`'s public-clue merge — so the takeover NPC knows what the table already knows. It
+ * NEVER inherits the departed human's private discovered clues, and NEVER sees any `clue.significance`.
+ */
+export function takeOverSeatAsNpc(room: Room, scenario: Scenario, characterId: string): Room {
+  const character = scenario.characters.find(item => item.id === characterId);
+  if (!character) {
+    return room; // Unknown character — nothing to take over.
+  }
+
+  const control = room.characterControl[characterId];
+  const takenOverFromPlayerId = control?.kind === 'human' ? control.playerId : undefined;
+
+  // Fresh shared NPC memory seeded with public clues only (mirror investigateRoom's public-clue merge).
+  const memory = initializeMemory(character);
+  const knownFacts = [...memory.knownFacts];
+  for (const clue of room.publicClues) {
+    const fact = `公共线索：${clue.content}`;
+    if (!knownFacts.includes(fact)) {
+      knownFacts.push(fact);
+    }
+  }
+
+  return {
+    ...room,
+    characterControl: {
+      ...room.characterControl,
+      [characterId]: { kind: 'npc', takenOverFromPlayerId },
+    },
+    characterMemories: {
+      ...room.characterMemories,
+      [characterId]: { ...memory, knownFacts },
+    },
+  };
+}
+
+/**
+ * Compose the pure takeover predicate (`seatsToTakeOver`) with `takeOverSeatAsNpc`: every seat whose
+ * human controller has been disconnected past `idleMs` is handed to an NPC. Pure — routes call this
+ * inside an atomic `updateRoom`.
+ */
+export function applyDisconnectTakeovers(room: Room, scenario: Scenario, now: number, idleMs: number): Room {
+  let next = room;
+  for (const characterId of seatsToTakeOver(room, now, idleMs)) {
+    next = takeOverSeatAsNpc(next, scenario, characterId);
+  }
+  return next;
+}
+
+/**
+ * Hand off the host role when the current host has been disconnected past `idleMs` (wraps the pure
+ * `reassignHost`). Only acts when the host is actually disconnected AND idle beyond the threshold;
+ * otherwise returns the room unchanged (including when there's no connected human to promote).
+ */
+export function reassignHostIfNeeded(room: Room, now: number, idleMs: number): Room {
+  const host = room.players.find(player => player.id === room.hostPlayerId);
+  if (host) {
+    const disconnected = host.connected === false || host.disconnectedAt !== undefined;
+    if (!disconnected) {
+      return room; // Host is connected — keep them.
+    }
+    if (host.disconnectedAt === undefined || now - host.disconnectedAt < idleMs) {
+      return room; // No measurable idle yet, or still within the grace window.
+    }
+  }
+  // Host is absent from the roster, or disconnected past the idle threshold → try to hand off.
+  return reassignHost(room) ?? room;
 }
 
 export function isNpcCharacter(room: Room, characterId: string): boolean {

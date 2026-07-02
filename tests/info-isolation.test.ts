@@ -14,7 +14,7 @@ delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 delete process.env.ANTHROPIC_API_KEY;
 
 const { createRoom, getRoom, getRoomByCode, updateRoom } = await import('../lib/store/rooms.ts');
-const { projectRoomForPlayer, toScenarioPublic } = await import('../lib/scenarios/projection.ts');
+const { projectRoomForPlayer, toScenarioPublic, seatsToTakeOver, reassignHost } = await import('../lib/scenarios/projection.ts');
 
 let pass = 0;
 let fail = 0;
@@ -223,7 +223,7 @@ check('C10: compacted summary retains recent content (offline last-N join)', com
 check('C10: below-threshold memory is returned unchanged (no needless rewrite)', (await compactConversationsIfNeeded(freshX, 20)) === freshX);
 
 console.log('Realtime bus:');
-const { publish, subscribe } = await import('../lib/realtime/room-bus.ts');
+const { publish, subscribe, markConnected, markDisconnected } = await import('../lib/realtime/room-bus.ts');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const received: any[] = [];
 const unsub = subscribe('room-x', event => received.push(event));
@@ -234,6 +234,134 @@ check('subscriber is isolated from other rooms', !received.some(event => event.t
 unsub();
 publish('room-x', { type: 'reveal' });
 check('unsubscribe stops delivery', received.length === 1);
+
+console.log('D2 seat takeover predicate (seatsToTakeOver):');
+const NOW = 1_000_000;
+const IDLE = 90_000;
+// Matrix room: one seat per case. characterControl drives which seats are candidates; players carry the
+// connect/disconnect state. seatsToTakeOver ignores `scenario`, so arbitrary seat ids are fine here.
+const takeoverRoom = {
+  players: [
+    { id: 'P_CONN', publicId: 'pc', name: 'Conn', isHost: false, connected: true, joinedAt: 1, assignedCharacterId: 'seatA', lastSeenAt: NOW },
+    { id: 'P_IDLE', publicId: 'pi', name: 'Idle', isHost: false, connected: false, disconnectedAt: NOW - 100_000, lastSeenAt: NOW - 100_000, joinedAt: 2, assignedCharacterId: 'seatB' },
+    { id: 'P_RECENT', publicId: 'pr', name: 'Recent', isHost: false, connected: false, disconnectedAt: NOW - 10_000, lastSeenAt: NOW - 10_000, joinedAt: 3, assignedCharacterId: 'seatC' },
+    { id: 'P_UNASSIGNED', publicId: 'pu', name: 'Unassigned', isHost: false, connected: false, disconnectedAt: NOW - 100_000, joinedAt: 4 },
+  ],
+  characterControl: {
+    seatA: { kind: 'human', playerId: 'P_CONN' },      // connected human → excluded
+    seatB: { kind: 'human', playerId: 'P_IDLE' },      // disconnected past idle → INCLUDED
+    seatC: { kind: 'human', playerId: 'P_RECENT' },    // within idle grace → excluded
+    seatD: { kind: 'npc' },                            // npc seat → excluded
+    seatE: { kind: 'human', playerId: 'P_UNASSIGNED' },// controller not seated here (unassigned) → excluded
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const seats = seatsToTakeOver(takeoverRoom, NOW, IDLE);
+check('seatsToTakeOver includes a disconnected-past-idle human seat', seats.includes('seatB'));
+check('seatsToTakeOver excludes a connected human seat', !seats.includes('seatA'));
+check('seatsToTakeOver excludes a within-idle disconnect', !seats.includes('seatC'));
+check('seatsToTakeOver excludes an npc seat', !seats.includes('seatD'));
+check('seatsToTakeOver excludes an unassigned/mismatched seat', !seats.includes('seatE'));
+check('seatsToTakeOver returns ONLY the past-idle seat', seats.length === 1 && seats[0] === 'seatB');
+
+console.log('D2 host handoff (reassignHost):');
+const hostRoom = {
+  hostPlayerId: 'H',
+  players: [
+    { id: 'H', publicId: 'pub-h', name: 'Host', isHost: true, connected: false, disconnectedAt: NOW - 100_000, joinedAt: 1 },
+    { id: 'A', publicId: 'pub-a', name: 'A', isHost: false, connected: true, joinedAt: 2 },
+    { id: 'B', publicId: 'pub-b', name: 'B', isHost: false, connected: true, joinedAt: 3 },
+  ],
+  characterControl: {},
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const reassigned = reassignHost(hostRoom);
+check('reassignHost moves hostPlayerId to the earliest-joined connected human', reassigned?.hostPlayerId === 'A');
+check('reassignHost moves the isHost flag to the successor and clears it elsewhere',
+  reassigned?.players.find((p: { id: string }) => p.id === 'A')?.isHost === true &&
+  reassigned?.players.find((p: { id: string }) => p.id === 'H')?.isHost === false &&
+  reassigned?.players.find((p: { id: string }) => p.id === 'B')?.isHost === false);
+const noneConnectedRoom = {
+  ...hostRoom,
+  players: hostRoom.players.map((p: Record<string, unknown>) => ({ ...p, connected: false, disconnectedAt: NOW - 100_000 })),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+check('reassignHost returns null when no connected human exists', reassignHost(noneConnectedRoom) === null);
+
+console.log('D2 projection presence + controlledByNpc + hostPublicId (+ D1 drawer data contract):');
+// Requester is a NON-host connected human seated on `other`. The host is disconnected and their `killer`
+// seat has been taken over by an NPC (takenOverFromPlayerId = the host's real id).
+const d2Room = {
+  ...getRoom(room.id)!,
+  status: 'in_progress',
+  currentPhase: 'DISCUSSION_1',
+  hostPlayerId: 'AUTH-HOST',
+  players: [
+    { id: 'AUTH-HOST', publicId: 'pub-host', name: 'HostP', isHost: true, connected: false, disconnectedAt: NOW - 5000, lastSeenAt: NOW, joinedAt: 1, assignedCharacterId: 'killer' },
+    { id: 'AUTH-REQ', publicId: 'pub-req', name: 'ReqP', isHost: false, connected: true, lastSeenAt: NOW, joinedAt: 2, assignedCharacterId: 'other' },
+  ],
+  characterControl: {
+    killer: { kind: 'npc', takenOverFromPlayerId: 'AUTH-HOST' },
+    other: { kind: 'human', playerId: 'AUTH-REQ' },
+  },
+  publicClues: [{ id: 'pc1', content: 'PUBLIC-CLUE-CONTENT', type: 'public', significance: 'SECRET-SIGNIFICANCE-2', availableInRound: 1 }],
+  discoveredClues: {},
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const d2View = projectRoomForPlayer(d2Room, scenario, 'AUTH-REQ')!;
+const d2Roster = d2View.room.players;
+const hostPub = d2Roster.find(p => p.publicId === 'pub-host')!;
+const reqPub = d2Roster.find(p => p.publicId === 'pub-req')!;
+check('projection: disconnected player shows connected=false', hostPub.connected === false);
+check('projection: connected player shows connected=true', reqPub.connected === true);
+check('projection: controlledByNpc is true for an NPC-taken-over seat', hostPub.controlledByNpc === true);
+check('projection: controlledByNpc is false for a human seat', reqPub.controlledByNpc === false);
+check("projection: room.hostPublicId is the host's publicId (not their real id)", d2View.room.hostPublicId === 'pub-host');
+// Serialize-and-scan: NO real player id except the requester's own (in `you`), including the host's id
+// and the taken-over player's id (both are 'AUTH-HOST'); and no server-only presence fields.
+const d2Blob = JSON.stringify(d2View);
+check("serialize-scan: host's real id never appears (hostPublicId + takenOverFromPlayerId both hidden)", !d2Blob.includes('AUTH-HOST'));
+check('serialize-scan: no disconnectedAt / lastSeenAt reach the client', !d2Blob.includes('disconnectedAt') && !d2Blob.includes('lastSeenAt'));
+check('serialize-scan: the requester keeps their own auth id in `you` (by design)', d2View.you.id === 'AUTH-REQ');
+// D1 drawer data-contract locks (these fields must survive for a later FE drawer).
+check('D1: scenario.setting exposes era/location/atmosphere/backgroundStory', d2View.scenario.setting.era === 'e' && d2View.scenario.setting.location === 'l' && d2View.scenario.setting.atmosphere === 'a' && d2View.scenario.setting.backgroundStory === 'b');
+check('D1: scenario.case keeps public fields and drops truth/method/motive',
+  d2View.scenario.case.victim === 'V' && d2View.scenario.case.causeOfDeath === 'C' && d2View.scenario.case.timeOfDeath === '00:00' && d2View.scenario.case.crimeScene === 'study' &&
+  !('truth' in d2View.scenario.case) && !('murderMethod' in d2View.scenario.case) && !('motive' in d2View.scenario.case));
+check('D1: scenario.timeline includes the public event and excludes the secret one', d2View.scenario.timeline.some(e => e.event === 'PUBLIC-EVENT') && !d2View.scenario.timeline.some(e => e.event === 'SECRET-EVENT'));
+check('D1: yourCharacter.privateScript is the requester own script', d2View.yourCharacter?.privateScript === 'SECRET-SCRIPT-O');
+check('D1: the OTHER character secret script/truth never appear in the view', !d2Blob.includes('SECRET-SCRIPT-K') && !d2Blob.includes('SECRET-TRUTH'));
+check('D1: room.publicClues and room.yourClues are arrays', Array.isArray(d2View.room.publicClues) && Array.isArray(d2View.room.yourClues));
+
+console.log('D2 takeover NPC memory seed (public clues only, no significance):');
+// Mirror takeOverSeatAsNpc's seed step (room-engine is not strip-types loadable, so replicate its pure
+// public-clue merge here over initializeMemory).
+const takeoverChar = scenario.characters[0]; // 'killer'
+let takeoverMem = initializeMemory(takeoverChar);
+const takeoverPublicClues = [
+  { id: 'pcA', content: 'PUB-CLUE-A', type: 'public', significance: 'SECRET-SIG-A', availableInRound: 1 },
+  { id: 'pcB', content: 'PUB-CLUE-B', type: 'public', significance: 'SECRET-SIG-B', availableInRound: 1 },
+];
+const seededFacts = [...takeoverMem.knownFacts];
+for (const clue of takeoverPublicClues) {
+  const fact = `公共线索：${clue.content}`;
+  if (!seededFacts.includes(fact)) {
+    seededFacts.push(fact);
+  }
+}
+takeoverMem = { ...takeoverMem, knownFacts: seededFacts };
+check('takeover memory has a 公共线索 entry per public clue', takeoverPublicClues.every(c => takeoverMem.knownFacts.includes(`公共线索：${c.content}`)));
+check('takeover memory carries NO clue.significance', !JSON.stringify(takeoverMem).includes('SECRET-SIG'));
+
+console.log('D2 room-bus connection refcount (markConnected / markDisconnected):');
+const rc1 = markConnected('rc-room', 'rc-player');
+check('refcount: first markConnected → firstConnection true (0→1)', rc1.firstConnection === true);
+const rc2 = markConnected('rc-room', 'rc-player');
+check('refcount: second markConnected → firstConnection false (1→2)', rc2.firstConnection === false);
+const rd1 = markDisconnected('rc-room', 'rc-player');
+check('refcount: markDisconnected once → lastConnection false (2→1)', rd1.lastConnection === false);
+const rd2 = markDisconnected('rc-room', 'rc-player');
+check('refcount: second markDisconnected → lastConnection true (1→0)', rd2.lastConnection === true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
