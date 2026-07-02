@@ -332,6 +332,51 @@ function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRo
   // Reuse the shared tally so the reveal, the advance-route tie check, and the projection all agree.
   const { tally, accusedCharacterId } = tallyVotes(room, scenario);
 
+  // Per-ballot breakdown (D5b), keyed BY CHARACTER — a raw playerId must NEVER land here (isolation).
+  // Known scenario character ids gate BOTH ends of every ballot.
+  const characterIds = new Set(scenario.characters.map(character => character.id));
+
+  // Reverse map: real playerId -> the character they play. Two sources so a taken-over seat still
+  // resolves: (1) each player's own `assignedCharacterId`, then (2) `human` characterControl entries
+  // (authoritative, applied last). For a seat that was taken over by an NPC (D2), the controlling entry
+  // is `npc`, so only source (1) resolves it — the disconnected human still holds `assignedCharacterId`,
+  // so their earlier vote maps to their character, never to their raw playerId. Only known character ids
+  // are ever inserted, so this map cannot smuggle a playerId into a ballot.
+  const characterIdByPlayerId = new Map<string, string>();
+  for (const player of room.players) {
+    if (player.assignedCharacterId && characterIds.has(player.assignedCharacterId)) {
+      characterIdByPlayerId.set(player.id, player.assignedCharacterId);
+    }
+  }
+  for (const [characterId, control] of Object.entries(room.characterControl)) {
+    if (control.kind === 'human' && characterIds.has(characterId)) {
+      characterIdByPlayerId.set(control.playerId, characterId);
+    }
+  }
+
+  const ballots: { voterCharacterId: string; accusedCharacterId: string }[] = [];
+  for (const [voterKey, accused] of Object.entries(room.votes)) {
+    // The vote value is already a characterId; drop anything that isn't a known cast member.
+    if (!characterIds.has(accused)) {
+      continue;
+    }
+    let voterCharacterId: string | undefined;
+    if (voterKey.startsWith('npc:')) {
+      const npcCharacterId = voterKey.slice(4);
+      if (characterIds.has(npcCharacterId)) {
+        voterCharacterId = npcCharacterId;
+      }
+    } else {
+      // Human vote key = a real (secret) playerId. Resolve it to their character; if it maps to nothing
+      // (unknown player / unassigned seat), DROP the ballot rather than ever emit a raw playerId.
+      voterCharacterId = characterIdByPlayerId.get(voterKey);
+    }
+    if (!voterCharacterId) {
+      continue;
+    }
+    ballots.push({ voterCharacterId, accusedCharacterId: accused });
+  }
+
   const groupCorrect = accusedCharacterId !== null && accusedCharacterId === killer?.id;
 
   // Which character did the requesting player play, and were they the killer?
@@ -352,6 +397,7 @@ function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRo
     characters: scenario.characters,
     cast,
     tally,
+    ballots,
     accusedCharacterId,
     groupCorrect,
     youWereKiller,

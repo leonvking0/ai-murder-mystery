@@ -136,6 +136,91 @@ console.log('B2 tally aggregates npc:-keyed votes:');
   check('groupCorrect true from npc-inclusive tally', view.reveal?.groupCorrect === true);
 }
 
+// ---- D5b: per-ballot tally at REVEAL (keyed by CHARACTER, never playerId) ----
+
+console.log('D5b buildReveal.ballots maps every voter to a character id (human + npc):');
+{
+  // Human P-KILLER plays character 'k'; an NPC seat 'd' also votes. Both accuse the killer 'k'.
+  const room = baseRoom({ currentPhase: 'REVEAL', votes: { 'P-KILLER': 'k', 'npc:d': 'k' } });
+  const view = projectRoomForPlayer(room, scenario, 'P-DET')!;
+  const ballots = view.reveal!.ballots;
+
+  check(
+    'ballot: the human vote is keyed by their assignedCharacterId (k), not their playerId',
+    ballots.some(b => b.voterCharacterId === 'k' && b.accusedCharacterId === 'k'),
+  );
+  check(
+    'ballot: the npc:d vote resolves to character d',
+    ballots.some(b => b.voterCharacterId === 'd' && b.accusedCharacterId === 'k'),
+  );
+  check('ballots.length === number of mappable vote keys (2)', ballots.length === 2);
+
+  // Isolation guard: every voterCharacterId is a known cast id; NONE is a real player.id.
+  const knownIds = new Set(scenario.characters.map((c: { id: string }) => c.id));
+  const forbiddenPlayerIds = new Set(['P-KILLER', 'P-DET']);
+  check('ballot: every voterCharacterId is a known scenario character id', ballots.every(b => knownIds.has(b.voterCharacterId)));
+  check('ballot: every accusedCharacterId is a known scenario character id', ballots.every(b => knownIds.has(b.accusedCharacterId)));
+  check(
+    'ballot: NO voterCharacterId equals a real player.id (isolation)',
+    ballots.every(b => !forbiddenPlayerIds.has(b.voterCharacterId)),
+  );
+  const blob = JSON.stringify(view.reveal!.ballots);
+  check('ballot: raw playerId "P-KILLER" never appears in the ballots blob', !blob.includes('P-KILLER'));
+
+  // The aggregate tally is unchanged by adding ballots.
+  const kVotes = view.reveal!.tally.find((e: { characterId: string }) => e.characterId === 'k')?.votes;
+  const dVotes = view.reveal!.tally.find((e: { characterId: string }) => e.characterId === 'd')?.votes;
+  check('tally unchanged: killer k has both votes (=2)', kVotes === 2);
+  check('tally unchanged: d has no votes (=0)', dVotes === 0);
+}
+
+console.log('D5b ballots resolve a TAKEN-OVER seat via assignedCharacterId (never the raw playerId):');
+{
+  // 'd' was taken over by an NPC (D2): control is now npc, but the disconnected human P-DET still holds
+  // assignedCharacterId 'd' and had already voted. Their ballot must map to 'd', never leak 'P-DET'.
+  const room = baseRoom({
+    currentPhase: 'REVEAL',
+    votes: { 'P-KILLER': 'k', 'P-DET': 'd' },
+    players: [
+      { id: 'P-KILLER', publicId: 'pk', name: '真凶玩家', isHost: true, connected: true, joinedAt: 1, assignedCharacterId: 'k' },
+      { id: 'P-DET', publicId: 'pd', name: '侦探玩家', isHost: false, connected: false, joinedAt: 2, assignedCharacterId: 'd' },
+    ],
+    characterControl: {
+      k: { kind: 'human', playerId: 'P-KILLER' },
+      d: { kind: 'npc', takenOverFromPlayerId: 'P-DET' },
+    },
+  });
+  const view = projectRoomForPlayer(room, scenario, 'P-KILLER')!;
+  const ballots = view.reveal!.ballots;
+  check(
+    'taken-over seat: P-DET\'s ballot maps to character d',
+    ballots.some(b => b.voterCharacterId === 'd' && b.accusedCharacterId === 'd'),
+  );
+  check('taken-over seat: no ballot voterCharacterId equals the raw playerId P-DET', ballots.every(b => b.voterCharacterId !== 'P-DET'));
+  check('taken-over seat: ballots.length === 2', ballots.length === 2);
+  check('taken-over seat: no raw playerId in the ballots blob', !JSON.stringify(ballots).includes('P-DET') && !JSON.stringify(ballots).includes('P-KILLER'));
+}
+
+console.log('D5b ballots DROP any vote key that maps to no character (never emit a raw playerId):');
+{
+  const room = baseRoom({
+    currentPhase: 'REVEAL',
+    votes: {
+      'P-KILLER': 'k',        // mappable human → k
+      'npc:d': 'k',           // mappable npc → d
+      'GHOST-PLAYER': 'k',    // unknown playerId → dropped
+      'npc:ghost': 'k',       // unknown npc character → dropped
+      'P-DET': 'ghost',       // accused not a known character → dropped
+    },
+  });
+  const view = projectRoomForPlayer(room, scenario, 'P-KILLER')!;
+  const ballots = view.reveal!.ballots;
+  check('drop: only the 2 mappable ballots survive', ballots.length === 2);
+  check('drop: unknown playerId "GHOST-PLAYER" produced no ballot', !JSON.stringify(ballots).includes('GHOST-PLAYER'));
+  check('drop: unknown npc character produced no ballot', !ballots.some(b => b.voterCharacterId === 'ghost'));
+  check('drop: a non-character accused produced no ballot', !ballots.some(b => b.accusedCharacterId === 'ghost'));
+}
+
 // ---- B5: present clue ----
 
 function memory(characterId: string) {

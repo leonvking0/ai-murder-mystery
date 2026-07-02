@@ -335,6 +335,9 @@ export interface RevealInfo {
   characters: Character[]; // full cast incl. private data — only sent at REVEAL
   cast: { characterId: string; playerName: string | null }[]; // who played whom (null = NPC)
   tally: { characterId: string; votes: number }[];
+  // Per-ballot breakdown of who voted for whom, keyed by CHARACTER — never playerId. Every voter (human
+  // or NPC) is resolved to their character id; any vote key that maps to no character is dropped.
+  ballots: { voterCharacterId: string; accusedCharacterId: string }[];
   accusedCharacterId: string | null; // most-voted character (null if no votes / tie)
   groupCorrect: boolean; // did the group's majority accuse the killer
   youWereKiller: boolean; // did the requesting player play the killer
