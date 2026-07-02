@@ -285,6 +285,12 @@ export function GroupChatPanel({
   const names = useMemo(() => nameMapOf(view), [view]);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
+  // E6 (KI-062): only auto-scroll when the player is already near the bottom, so scrolling up to
+  // review history isn't yanked back down by new messages / stream chunks. Refs (not state) avoid
+  // re-render churn on every scroll event. `scrollRef` marks the message list; the element that
+  // actually scrolls is the Radix ScrollArea viewport (an ancestor), located via closest().
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
 
   // D3(a): client-side idle detection. `idle` flips true ~25s after the last chat activity (a new
   // message or a streaming-state change) and resets on every such change — same deps as auto-scroll.
@@ -294,8 +300,27 @@ export function GroupChatPanel({
   const nudgeCooldownRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // E6: skip the jump when the user has scrolled up to read history (near-bottom flag is false).
+    if (!nearBottomRef.current) {
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, streaming]);
+
+  // E6: track near-bottom on the real scroll container (the ScrollArea viewport). A native listener
+  // is used because React's onScroll does not bubble from the viewport up to a wrapper element.
+  useEffect(() => {
+    const viewport = scrollRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) {
+      return;
+    }
+    const handleScroll = () => {
+      nearBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+    };
+    handleScroll();
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIdle(true), 25000);
@@ -360,7 +385,7 @@ export function GroupChatPanel({
       </div>
 
       <ScrollArea className="h-0 flex-1 px-4 py-3">
-        <div className="space-y-3 pr-2">
+        <div ref={scrollRef} className="space-y-3 pr-2">
           {messages.map(message => {
             if (message.role === 'system') {
               return (
@@ -449,12 +474,36 @@ export function PrivateChatPanel({
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  // E6 (KI-062): mirror GroupChatPanel — only auto-scroll when the player is already near the bottom.
+  // Refs (not state) avoid re-render churn; `scrollRef` marks the message list, and the element that
+  // actually scrolls is the Radix ScrollArea viewport (an ancestor), located via closest().
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
 
   const thread = (targetId ? view.room.yourPrivateChats[targetId] : undefined) ?? [];
 
   useEffect(() => {
+    // E6: skip the jump when the user has scrolled up to read history (near-bottom flag is false).
+    if (!nearBottomRef.current) {
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [thread.length, sending]);
+
+  // E6: track near-bottom on the real scroll container (the ScrollArea viewport). A native listener
+  // is used because React's onScroll does not bubble from the viewport up to a wrapper element.
+  useEffect(() => {
+    const viewport = scrollRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) {
+      return;
+    }
+    const handleScroll = () => {
+      nearBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+    };
+    handleScroll();
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
 
   if (npcCharacters.length === 0) {
     return (
@@ -503,7 +552,7 @@ export function PrivateChatPanel({
       </div>
 
       <ScrollArea className="h-0 flex-1 px-4 py-3">
-        <div className="space-y-3 pr-2">
+        <div ref={scrollRef} className="space-y-3 pr-2">
           {thread.map(message => {
             const mine = message.role === 'player';
             return (
