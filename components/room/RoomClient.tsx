@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhaseIndicator } from '@/components/game/PhaseIndicator';
+import { CaseFileDrawer } from '@/components/room/CaseFileDrawer';
 import {
   GroupChatPanel,
   InvestigationRoom,
@@ -13,6 +14,7 @@ import {
   PrivateChatPanel,
   RevealRoom,
   RoleReveal,
+  Roster,
   VotingRoom,
 } from '@/components/room/RoomPanels';
 import { getNextPhase } from '@/lib/game-engine/phase-manager';
@@ -183,6 +185,15 @@ export function RoomClient({ code }: RoomClientProps) {
       switch (payload.type) {
         case 'room_state':
         case 'vote_update':
+        case 'presence':
+          // D2: roster presence changes (connect/disconnect) — just resync the projection.
+          refetchState();
+          break;
+        case 'seat_takeover':
+        case 'host_change':
+          // D2: an idle seat became NPC-controlled, or the host handed off. Resync, and flash a brief
+          // notice (reuses the transient npcNotice channel).
+          setNpcNotice(payload.type === 'host_change' ? '房主已变更' : '有掉线玩家的席位已由 AI 接管');
           refetchState();
           break;
         case 'phase_change':
@@ -437,6 +448,13 @@ export function RoomClient({ code }: RoomClientProps) {
     );
   };
 
+  // D3(a): nudge the NPCs to speak after the room goes idle (no player message).
+  const sendNudge = () => {
+    action('group-chat', { nudge: true }).catch(e =>
+      setError(e instanceof Error ? e.message : '发送失败'),
+    );
+  };
+
   const sendPrivate = async (characterId: string, message: string) => {
     // C11: surface failures via setError instead of leaving an unhandled rejection; the panel still
     // gets a resolved Promise<void> so its own "sending" state clears.
@@ -548,7 +566,12 @@ export function RoomClient({ code }: RoomClientProps) {
           </div>
         </header>
 
-        {inProgress && <div className="mb-4"><PhaseIndicator phase={phase} /></div>}
+        {inProgress && (
+          <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <PhaseIndicator phase={phase} />
+            <Roster view={view} />
+          </div>
+        )}
         {(disconnected || npcNotice) && (
           <div className="mb-4 flex flex-wrap justify-center gap-2">
             {disconnected && (
@@ -583,7 +606,13 @@ export function RoomClient({ code }: RoomClientProps) {
                 <TabButton active={chatTab === 'private'} onClick={() => setChatTab('private')}>私聊 AI</TabButton>
               </div>
               {chatTab === 'group' ? (
-                <GroupChatPanel view={view} messages={groupMessages} streaming={streamingList} onSend={sendGroup} />
+                <GroupChatPanel
+                  view={view}
+                  messages={groupMessages}
+                  streaming={streamingList}
+                  onSend={sendGroup}
+                  onNudge={sendNudge}
+                />
               ) : (
                 <PrivateChatPanel view={view} onSend={sendPrivate} />
               )}
@@ -599,9 +628,38 @@ export function RoomClient({ code }: RoomClientProps) {
           </div>
         )}
 
-        {phase === 'VOTING' && inProgress && <VotingRoom view={view} onVote={vote} />}
+        {/* D5(a): the defense/vote round keeps its group chat (mirrors the discussion layout). */}
+        {phase === 'VOTING' && inProgress && (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="space-y-4">
+              <VotingRoom view={view} onVote={vote} />
+              <div>
+                <div className="mb-3 flex gap-2">
+                  <TabButton active={chatTab === 'group'} onClick={() => setChatTab('group')}>群聊</TabButton>
+                  <TabButton active={chatTab === 'private'} onClick={() => setChatTab('private')}>私聊 AI</TabButton>
+                </div>
+                {chatTab === 'group' ? (
+                  <GroupChatPanel
+                    view={view}
+                    messages={groupMessages}
+                    streaming={streamingList}
+                    onSend={sendGroup}
+                    onNudge={sendNudge}
+                  />
+                ) : (
+                  <PrivateChatPanel view={view} onSend={sendPrivate} />
+                )}
+              </div>
+            </div>
+            <Notebook view={view} onPresent={presentClue} />
+          </div>
+        )}
 
         {phase === 'REVEAL' && <RevealRoom view={view} />}
+
+        {/* D1: always-on case-file + own-script reference. LOBBY has no assigned character; REVEAL
+            already discloses everything, so it is intentionally not mounted in those states. */}
+        {inProgress && phase !== 'REVEAL' && <CaseFileDrawer view={view} />}
       </div>
     </main>
   );
