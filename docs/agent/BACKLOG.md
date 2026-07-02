@@ -11,10 +11,16 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-01:** ✅ **Batch A (security) and Batch B (min gameplay loop) are DONE** — landed via PRs #2–#5
-> (multi-agent orchestration: opus-4.8 workers in git worktrees, Fable audit + merge). Test suite 22 → 90
-> checks. Next up: **Batch C (robustness)**. Deferred follow-ups: auto NPC self-intro on INTRO entry;
-> unwrapped player lines inside the group-chat `groupContext` are a minor residual injection surface (guard covers phase-change claims).
+> **Status 2026-07-01:** ✅ **Batches A (security), B (min gameplay loop), and C (robustness) are DONE.**
+> A+B landed via PRs #2–#6; **C landed via PRs #7–#10** (same multi-agent orchestration: opus-4.8 workers in
+> git worktrees, Fable audit + squash-merge; two waves — CHAT+ENGINE, then FRONT+MEMORY). Test suite 22 → 90
+> → **156 checks** (info-isolation 57 + gameplay-chat 37 + gameplay-reveal 62). tsc/eslint/Turbopack build green.
+> Next up: **Batch D (gameplay depth)** or **Batch E (robustness lows & housekeeping)**.
+> Deferred follow-ups from C: first-come-exclusive private clues (part of C8); signed reconnect cookie to
+> rebind a seat (part of C5/D2); private-chat not-configured still yields a canned line (KI-059, Batch E);
+> compaction read-modify-write vs a concurrent `present-clue` is a narrow, self-healing race (Batch E nit).
+> Earlier deferred: auto NPC self-intro on INTRO entry; unwrapped player lines inside the group-chat
+> `groupContext` are a minor residual injection surface (guard covers phase-change claims).
 
 ---
 
@@ -66,32 +72,32 @@
 
 ## Batch C — Robustness (medium bugs) 🟠
 
-- [ ] **C1 · KI-035 (high) — concurrent-turn correctness + client streaming.** Per-room NPC-turn mutex
+- [x] **C1 · KI-035 (high) — concurrent-turn correctness + client streaming.** ✅ PR #8 (server) + #9 (client) Per-room NPC-turn mutex
   (Promise queue); tag `npc_*` with `turnId+messageId`; client keeps `Map<characterId,text>` bubbles;
   persist + `npc_done` each NPC as its stream finishes (not at turn end). **Files:**
   `group-chat/route.ts`, `lib/agents/room-group-chat.ts`, `RoomClient.tsx`. — **M**
-- [ ] **C2 · KI-049 — idempotent advance.** Body carries `expectedPhase`; mutator 409s on mismatch;
+- [x] **C2 · KI-049 — idempotent advance.** ✅ PR #7 (server) + #9 (client busy-guard) Body carries `expectedPhase`; mutator 409s on mismatch;
   `doAdvance` starts `if (busy) return`. **Files:** `advance/route.ts`, `room-engine.ts`, `RoomClient.tsx`. — **S**
-- [ ] **C3 · KI-046 — SSE `onerror` + reconnect + banner + low-freq `/state` poll fallback.** **File:**
+- [x] **C3 · KI-046 — SSE `onerror` + reconnect + banner + low-freq `/state` poll fallback.** ✅ PR #9 **File:**
   `RoomClient.tsx`. — **S/M**
-- [ ] **C4 · KI-047 — clear stale streaming bubble on refetch / phase_change / timeout.** **File:**
+- [x] **C4 · KI-047 — clear stale streaming bubble on refetch / phase_change / timeout.** ✅ PR #9 **File:**
   `RoomClient.tsx`. — **S**
-- [ ] **C5 · KI-048 — join page reads `resolve.status`; hide the form for `in_progress` rooms** (short
+- [x] **C5 · KI-048 — join page reads `resolve.status`; hide the form for `in_progress` rooms** ✅ PR #9 (signed reconnect cookie deferred) (short
   term); signed reconnect cookie to rebind a seat (mid term, shares A1's cookie work). **Files:**
   `RoomClient.tsx`, later `join/route.ts`. — **S**
-- [ ] **C6 · KI-044 — differentiate not-configured vs request-failed; emit `npc_error`; don't persist
+- [x] **C6 · KI-044 — differentiate not-configured vs request-failed; emit `npc_error`; don't persist ✅ PR #8
   failed turns.** **Files:** `npc-agent.ts`, `room-bus.ts`, `group-chat/route.ts`. — **S/M**
-- [ ] **C7 · KI-039 — isolate NPC prompt memory per `(playerId, characterId)`; label speaker/channel in
+- [x] **C7 · KI-039 — isolate NPC prompt memory per `(playerId, characterId)`; label speaker/channel in ✅ PR #10
   `appendConversation`** (also fixes KI-015 round:0). **Files:** `memory-manager.ts`, chat routes,
   `npc-base.ts`. — **M**
-- [ ] **C8 · KI-042 — per-phase investigation budget (`investigationCounts[playerId]`) + optional
+- [x] **C8 · KI-042 — per-phase investigation budget (`investigationCounts[playerId]`) + optional ✅ PR #7 (budget; exclusive clues deferred)
   first-come-exclusive private clues.** **Files:** `room-investigation.ts`, `RoomPanels.tsx`. — **S/M**
-- [ ] **C9 · KI-043 — VOTING→REVEAL requires all connected humans voted (host override); tie → revote,
+- [x] **C9 · KI-043 — VOTING→REVEAL requires all connected humans voted (host override); tie → revote, ✅ PR #7 (engine) + #9 (UI)
   not silent loss.** **Files:** `room-engine.ts`, `projection.ts`, `RoomPanels.tsx`. — **M**
-- [ ] **C10 · KI-011 (back half) / KI-021 — rebuild groupContext between speakers in a turn; truncate
+- [x] **C10 · KI-011 (back half) / KI-016 — rebuild groupContext between speakers in a turn; truncate ✅ PR #10
   private-chat history + wire `summarizeConversations` in the room path.** **Files:**
   `room-group-chat.ts`, `npc-agent.ts`, `memory-manager.ts`. — **M**
-- [ ] **C11 · KI-063 / KI-064 — add `catch` to private-chat + vote submits; seq-guard/Abort concurrent
+- [x] **C11 · KI-063 / KI-064 — add `catch` to private-chat + vote submits; seq-guard/Abort concurrent ✅ PR #9
   `refetchState`.** **Files:** `RoomPanels.tsx`, `RoomClient.tsx`. — **S**
 
 ## Batch D — Gameplay depth (second tier) 📈

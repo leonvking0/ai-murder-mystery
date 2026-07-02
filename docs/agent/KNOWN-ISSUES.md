@@ -138,7 +138,7 @@ prompt-caching for cost, per-phase min-participation gates. See `design/multipla
 - **Fix:** Update suspicion/emotion from conversation/clue events and feed deltas back, or remove the
   fields to reduce dead surface.
 
-### KI-011 · NPCs can't react to player-found clues or to each other mid-turn · design · open
+### KI-011 · NPCs can't react to player-found clues or to each other mid-turn · design · ✅ fixed (PR #5 present-clue + PR #10 in-turn context rebuild)
 - **Where:** `group-chat-manager.ts:74-107` builds one `groupContext` snapshot before the turn; private
   clues the player finds never enter NPC memory.
 - **Impact:** NPCs ignore the player's private evidence; in a multi-NPC turn, later speakers don't see
@@ -164,7 +164,7 @@ prompt-caching for cost, per-phase min-participation gates. See `design/multipla
 ### KI-014 · `better-sqlite3` dependency is unused · maintainability · open
 Remove it, or use it for KI-002. (`package.json`)
 
-### KI-015 · `appendConversation` always stamps `round: 0` · bug(minor) · open
+### KI-015 · `appendConversation` always stamps `round: 0` · bug(minor) · ✅ fixed (PR #10 — real round + speaker/channel label)
 `memory-manager.ts:36` — round context is lost from conversation summaries.
 
 ### KI-016 · `summarizeConversations` can append summary facts repeatedly · perf(minor) · open
@@ -310,7 +310,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   `assignedCharacterId`) as the client render key. Bind the auth `playerId` to a signed httpOnly cookie
   issued at create/join; `/state` + every action must verify cookie == claimed playerId.
 
-### KI-035 · Concurrent group-chat turns interleave + single-slot client streaming garbles NPC bubbles · bug/high · open
+### KI-035 · Concurrent group-chat turns interleave + single-slot client streaming garbles NPC bubbles · bug/high · ✅ fixed (PR #8 server + PR #9 client)
 - **Where:** `app/api/room/[id]/group-chat/route.ts:81` (no per-room NPC-turn mutex; each human message
   starts its own `manageRoomGroupResponse`); `components/room/RoomClient.tsx:138` (one `streaming` slot,
   `npc_chunk` handler appends to it without checking `characterId` matches).
@@ -354,7 +354,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   truth/isKiller, but the whole discussion + public clues are room-private.
 - **Fix:** Verify `playerId ∈ room.players` (403 like `/state`); long-term signed cookie per KI-023.
 
-### KI-039 · Cross-player leak via shared NPC memory (private chats + un-attributed "玩家" speaker) · bug/medium · open
+### KI-039 · Cross-player leak via shared NPC memory (private chats + un-attributed "玩家" speaker) · bug/medium · ✅ fixed (PR #10)
 - **Where:** `private-chat/route.ts:115` writes both sides into `characterMemories[characterId]` (keyed by
   character, shared across all players, not per `(playerId, characterId)`); `memory-manager.ts:32`
   labels every human line "玩家" with no speaker id, and `formatPersonalMemory` mixes the last 6 across
@@ -381,7 +381,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   characters (possibly the killer) to players who never show up → game ruined, non-self-healing.
 - **Fix:** Require a host-issued invite/signed token or at least rate-limit + dedup; let host kick pre-start.
 
-### KI-042 · No investigation budget + private clues aren't exclusive → one player sweeps the whole map · design/medium · open
+### KI-042 · No investigation budget + private clues aren't exclusive → one player sweeps the whole map · design/medium · ✅ fixed (PR #7 — per-phase budget; first-come-exclusive clues deferred)
 - **Where:** `lib/game-engine/room-investigation.ts:52` — no per-phase search count (server or client);
   private-clue dedup is per-player only, so the same private clue is found by everyone.
 - **Impact:** In INVESTIGATION_2 each player searches all 5 locations → gets all 20 clues incl. all 10
@@ -390,7 +390,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Track `investigationCounts[playerId]` per phase (1-2 searches), enforce in `investigateRoom`;
   optionally make private clues first-come exclusive (`claimedBy`).
 
-### KI-043 · VOTING→REVEAL needs only ≥1 vote, ties unhandled → host ends voting early / killer wins silently on a tie · design/medium · open
+### KI-043 · VOTING→REVEAL needs only ≥1 vote, ties unhandled → host ends voting early / killer wins silently on a tie · design/medium · ✅ fixed (PR #7)
 - **Where:** `room-engine.ts:97` (`canAdvanceRoom` only checks `votes.length > 0`); `buildReveal`
   (`projection.ts:152-154`) sets `accusedCharacterId=null` on a tie with no revote. NPCs don't vote (KI-013),
   so small rooms tie easily.
@@ -400,7 +400,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Require votes == connected humans (or explicit host override); on tie, return "平票，请改票" or a
   revote round before REVEAL.
 
-### KI-044 · KI-027 confirmed still open: LLM failure/not-configured swallowed into a canned line, persisted into history + memory · bug(llm)/medium · open
+### KI-044 · KI-027 confirmed still open: LLM failure/not-configured swallowed into a canned line, persisted into history + memory · bug(llm)/medium · ✅ fixed (PR #8 — group chat; private-chat canned line still per KI-059)
 - **Where:** `npc-agent.ts:88` (catch yields one canned sentence for every error class), `:62/:105`
   (not-configured yields another canned line). No `npc_error` event type in `room-bus`. `group-chat`
   persists the canned line into `groupChatHistory` + NPC memory.
@@ -419,7 +419,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** 400 on empty non-nudge; per-room NPC cooldown (every M human messages / N seconds); per-room
   token bucket before the LLM call.
 
-### KI-046 · Client SSE has no `onerror`/reconnect → one non-200 permanently freezes the room · bug/medium · open
+### KI-046 · Client SSE has no `onerror`/reconnect → one non-200 permanently freezes the room · bug/medium · ✅ fixed (PR #9)
 - **Where:** `RoomClient.tsx:115` sets only `onmessage`; no `onerror`, no reconnect, no polling fallback.
   Per spec, a non-200 / non-`text/event-stream` response sets `readyState=CLOSED` and never reconnects.
   `sendGroup` has no optimistic echo/refetch — the sender only sees their message via the SSE round-trip.
@@ -429,7 +429,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** `onerror`: exponential-backoff reconnect + refetch on CLOSED, show a "reconnecting" banner; add
   low-freq `/state` polling as backup. (Also clear stale `streaming` bubbles on refetch — KI-047.)
 
-### KI-047 · Lost `npc_done` (backgrounded/dropped) leaves a ghost streaming bubble forever · bug(ux)/medium · open
+### KI-047 · Lost `npc_done` (backgrounded/dropped) leaves a ghost streaming bubble forever · bug(ux)/medium · ✅ fixed (PR #9)
 - **Where:** `RoomClient.tsx:145` — `streaming` only clears on `npc_done`; the refetch path (`:124-129`)
   never clears it. EventSource reconnect doesn't replay missed events.
 - **Impact:** iOS player locks screen mid-stream → reconnect + refetch brings the full NPC line into
@@ -438,7 +438,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** On refetch / `room_state` / `phase_change`, drop any `streaming` whose characterId already has
   a newer persisted message; add a streaming-bubble timeout.
 
-### KI-048 · Losing localStorage identity mid-game locks the player out; join page misleads on in_progress rooms · bug(ux)/medium · open
+### KI-048 · Losing localStorage identity mid-game locks the player out; join page misleads on in_progress rooms · bug(ux)/medium · ✅ fixed (PR #9 — join-status gate; signed reconnect cookie deferred)
 - **Where:** `RoomClient.tsx:270` — identity is localStorage-only (`lib/room/identity.ts`). Cleared data /
   new device / iOS ITP → `need-join`; the join view ignores `resolve`'s `status` and shows the join form
   for an `in_progress` room, but `join/route.ts:35` 409s non-lobby.
@@ -447,7 +447,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Short-term: read `resolve.status`, hide the form + show "游戏进行中，无法加入" for in_progress;
   mid-term: signed reconnect cookie (per KI-034/KI-023) to rebind the seat.
 
-### KI-049 · `advance` isn't idempotent (no `expectedPhase`) + client `doAdvance` doesn't guard `busy` → double-click skips a whole phase · bug/medium · open
+### KI-049 · `advance` isn't idempotent (no `expectedPhase`) + client `doAdvance` doesn't guard `busy` → double-click skips a whole phase · bug/medium · ✅ fixed (PR #7 server + PR #9 client)
 - **Where:** `advance/route.ts:49` / `room-engine.ts:103-117` re-check only "can advance", not "advance
   *from the phase the requester saw*"; no `expectedPhase` in the body. `RoomClient.tsx:223` sets
   `busy=true` but doesn't early-return; a same-frame double-click sends two valid POSTs. No rollback path.
@@ -499,9 +499,9 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   (`state/route.ts:11`).
 - **KI-062** `scrollIntoView` on every message/chunk forces scroll-to-bottom; can't review history mid-chat
   (`RoomPanels.tsx:214`).
-- **KI-063** private-chat + vote submit paths have no `catch` → phase-race 403s silently drop the message/
+- **KI-063** ✅ fixed (PR #9) private-chat + vote submit paths have no `catch` → phase-race 403s silently drop the message/
   vote with no feedback (`RoomPanels.tsx:346`).
-- **KI-064** concurrent `refetchState` responses can arrive out of order and overwrite newer state (no seq
+- **KI-064** ✅ fixed (PR #9) concurrent `refetchState` responses can arrive out of order and overwrite newer state (no seq
   guard / AbortController) (`RoomClient.tsx:83`).
 - **KI-065** identity-in-hand entry has no error handling on `refetchState` → permanent "正在进入房间..."
   on failure, and can induce duplicate joins / ghost players (`RoomClient.tsx:89`).
