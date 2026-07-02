@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import { streamNPCResponse } from '@/lib/agents/npc-agent';
-import { appendConversation } from '@/lib/game-engine/memory-manager';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
@@ -79,7 +78,10 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
     }
 
     const threadKey = `${playerId}:${targetCharacterId}`;
-    const history = room.privateChats[threadKey] ?? [];
+    // C10 (KI-021): cap what we hand the model so the prompt can't grow unbounded. The FULL thread is
+    // still persisted below (and is what the requesting player sees) — only the model input is trimmed.
+    const PRIVATE_HISTORY_LIMIT = 16;
+    const history = (room.privateChats[threadKey] ?? []).slice(-PRIVATE_HISTORY_LIMIT);
 
     const knownClues = [
       ...memory.discoveredClues.map(clue => clue.content),
@@ -108,20 +110,16 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       id: randomUUID(), role: 'npc', characterId: targetCharacterId, content: reply, timestamp: now + 1,
     };
 
+    // C7 (KI-039) — the private turn is persisted ONLY to this player's isolated thread. It must NOT
+    // enter the SHARED `characterMemories[targetCharacterId]`: that shared memory is rendered into
+    // EVERY player's prompt/group context for this NPC, so writing a private line there would leak
+    // player A's private conversation into player B's view of the NPC. The isolated thread below is
+    // this player's private history with the NPC, and it is what feeds their own `conversationHistory`.
     updateRoom(id, current => {
-      const currentMemory = current.characterMemories[targetCharacterId];
-      let nextMemory = currentMemory;
-      if (currentMemory) {
-        nextMemory = appendConversation(currentMemory, { role: 'player', content: message, characterId: targetCharacterId });
-        nextMemory = appendConversation(nextMemory, { role: 'npc', content: reply, characterId: targetCharacterId });
-      }
       const currentThread = current.privateChats[threadKey] ?? [];
       return {
         ...current,
         privateChats: { ...current.privateChats, [threadKey]: [...currentThread, playerMessage, npcMessage] },
-        characterMemories: nextMemory
-          ? { ...current.characterMemories, [targetCharacterId]: nextMemory }
-          : current.characterMemories,
       };
     });
 

@@ -149,7 +149,16 @@ export async function* manageRoomGroupResponse(
   const streamResponse =
     deps?.streamResponse ?? (await import('./npc-agent.ts')).streamNPCGroupResponse;
 
-  const groupContext = buildGroupContext(room, scenario);
+  // Base context from the STORED history (persistence happens in the route AFTER each `done`, so it
+  // does not yet contain this turn's replies). Computed once; the per-responder context is this base
+  // plus the in-turn lines accumulated below.
+  const baseGroupContext = buildGroupContext(room, scenario);
+  const characterNameById = new Map(scenario.characters.map(character => [character.id, character.name]));
+  // C10 (KI-011/021): responders speak sequentially within a single turn. Without this, the 2nd/3rd
+  // NPC could not see what earlier responders just said (that text is not persisted until the route
+  // handles their `done`). Accumulate each responder's final line in-memory and append it — labeled by
+  // speaker — to the context handed to subsequent responders. No store round-trip.
+  const inTurnLines: string[] = [];
   // Pass the RAW player text through — npc-agent wraps it in <玩家发言> delimiters (or falls back
   // to a self-prompt when empty). Never prefix/format player text here.
   const scenarioPublic = toScenarioPublic(scenario);
@@ -167,6 +176,9 @@ export async function* manageRoomGroupResponse(
       ...memory.discoveredClues.map(clue => clue.content),
       ...memory.knownFacts,
     ];
+
+    // Context for THIS responder: the stored base plus any lines earlier responders produced this turn.
+    const groupContext = [baseGroupContext, ...inTurnLines].filter(Boolean).join('\n');
 
     yield { kind: 'start', characterId, messageId };
 
@@ -198,6 +210,13 @@ export async function* manageRoomGroupResponse(
       console.error(`NPC group stream failed for ${characterId}:`, error);
       yield { kind: 'error', characterId, messageId, reason: 'failed' };
       continue;
+    }
+
+    // Feed this responder's line to subsequent responders in the same turn (C10). Only non-empty
+    // content is carried forward — matches the route, which persists non-empty turns only.
+    const finalText = content.trim();
+    if (finalText) {
+      inTurnLines.push(`${characterNameById.get(characterId) ?? characterId}: ${finalText}`);
     }
 
     // C4: a responder that started and did not throw always gets exactly one terminal `done` (even

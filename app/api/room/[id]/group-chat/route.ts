@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { manageRoomGroupResponse } from '@/lib/agents/room-group-chat';
-import { appendConversation } from '@/lib/game-engine/memory-manager';
+import { appendConversation, compactConversationsIfNeeded } from '@/lib/game-engine/memory-manager';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
@@ -90,6 +90,12 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
     //    the persisted ChatMessage.id) so the client can key + dedup its streaming bubble. Each
     //    `npc_start` is followed by exactly one terminal `npc_done` OR `npc_error` for that messageId.
     const turnId = randomUUID();
+    // Speaker labeling for NPC memory (C7 / KI-015): render lines as `[群聊] 张三: …` instead of a
+    // generic `玩家: …`. The human's line is attributed to their assigned character (fall back to their
+    // display name); each NPC's line to that NPC's own name.
+    const characterNameById = new Map(scenario.characters.map(character => [character.id, character.name]));
+    const humanSpeakerName =
+      (player.assignedCharacterId && characterNameById.get(player.assignedCharacterId)) || player.name;
     await runExclusive(id, async () => {
       const fresh = getRoom(id);
       if (!fresh) {
@@ -121,14 +127,21 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
             // C6: never persist an empty/whitespace-only turn — but still emit the terminal npc_done
             // so the client can always clear the streaming bubble (C4).
             if (trimmed) {
+              const npcSpeakerName = characterNameById.get(characterId) ?? characterId;
               updateRoom(id, current => {
                 const memory = current.characterMemories[characterId];
                 let nextMemory = memory;
                 if (memory) {
                   if (message) {
-                    nextMemory = appendConversation(nextMemory, { role: 'player', content: message, characterId });
+                    nextMemory = appendConversation(nextMemory, {
+                      role: 'player', content: message, characterId,
+                      speakerName: humanSpeakerName, channel: 'group', round: current.round,
+                    });
                   }
-                  nextMemory = appendConversation(nextMemory, { role: 'npc', content: trimmed, characterId });
+                  nextMemory = appendConversation(nextMemory, {
+                    role: 'npc', content: trimmed, characterId,
+                    speakerName: npcSpeakerName, channel: 'group', round: current.round,
+                  });
                 }
                 return {
                   ...current,
@@ -138,6 +151,20 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
                     : current.characterMemories,
                 };
               });
+
+              // C10 (KI-021): bound the shared NPC memory. Safe here because the whole responder loop
+              // runs under the per-room lock (runExclusive), so no concurrent turn interleaves this
+              // read-modify-write. Only rewrites when compaction actually changed the array.
+              const afterAppend = getRoom(id)?.characterMemories[characterId];
+              if (afterAppend) {
+                const compacted = await compactConversationsIfNeeded(afterAppend);
+                if (compacted !== afterAppend) {
+                  updateRoom(id, current => ({
+                    ...current,
+                    characterMemories: { ...current.characterMemories, [characterId]: compacted },
+                  }));
+                }
+              }
             }
 
             publish(id, { type: 'npc_done', turnId, messageId, characterId, message: npcMessage });
