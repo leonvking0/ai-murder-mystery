@@ -12,6 +12,11 @@ interface NPCPromptGameState {
   emotionalState: string;
 }
 
+// STATIC role-play guidance (D4 / KI-010): tells the NPC HOW to behave when cornered. This is guidance
+// WE author — it references no secret and no other character's data, so it is not a leak.
+const CORNERED_DEFENSE_GUIDANCE =
+  '当有人把矛头指向你、或线索看似指向你时，你会本能地心虚/慌乱，但要慌而不乱地用你的不在场证明辩护，越被逼到墙角越要辩得凶，绝不认罪。';
+
 function formatObjectives(objectives: Character['objectives']): string {
   if (objectives.length === 0) {
     return '暂无明确任务';
@@ -41,6 +46,30 @@ function formatPersonalMemory(memory: CharacterMemory): string {
   }
 
   return conversationNotes;
+}
+
+// Render this NPC's OWN internal suspicions for its private prompt (D4 / KI-010). Self is filtered out
+// (never render a self-suspicion). Each record shows only its numeric level plus its LAST reason — and
+// those reason strings are only ever OUR generated text (updateSuspicion callers author them), never
+// another character's secret. Mirrors npc-voter.buildVoteContext's `- 名字：怀疑度x/10（…）` style.
+function formatSuspicions(
+  memory: CharacterMemory,
+  allCharacters: Character[],
+  currentCharacterId: string,
+): string {
+  const nameById = new Map(allCharacters.map(character => [character.id, character.name]));
+
+  const lines = memory.suspicions
+    .filter(record => record.characterId !== currentCharacterId)
+    .map(record => {
+      const name = nameById.get(record.characterId) ?? record.characterId;
+      const lastReason = record.reasons[record.reasons.length - 1];
+      return lastReason
+        ? `- ${name}：怀疑度${record.level}/10（${lastReason}）`
+        : `- ${name}：怀疑度${record.level}/10`;
+    });
+
+  return lines.length ? lines.join('\n') : '暂无明显怀疑';
 }
 
 function summarizePublicInfo(publicInfo: string): string {
@@ -132,6 +161,7 @@ export function buildNPCSystemPrompt(
   const relationships = formatRelationships(character, allCharacters);
   const publicCaseFacts = formatPublicCaseFacts(scenarioPublic);
   const claimedAlibi = formatClaimedAlibi(character.alibi);
+  const suspicions = formatSuspicions(memory, allCharacters, character.id);
 
   return `你是${character.name}，${character.age}岁，${character.occupation}。
 
@@ -183,6 +213,10 @@ ${objectives}
 你目前知道的线索：
 ${knownClues}
 你的情绪：${gameState.emotionalState}
+
+## 你此刻的怀疑（仅你可见）
+${suspicions}
+${CORNERED_DEFENSE_GUIDANCE}
 
 ## 你的个人记忆（仅你可见）
 ${personalMemory}`;
