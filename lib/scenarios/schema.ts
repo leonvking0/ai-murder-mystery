@@ -1,11 +1,14 @@
 // Scenario Schema Validation
 // Validates scenario JSON files against expected structure
 
-import type { Scenario, Character } from '../../types/game';
+import type { Scenario, Character, InvestigationLocation, Clue } from '../../types/game';
 
 export class ScenarioValidationError extends Error {
-  constructor(message: string, public path: string) {
+  path: string;
+
+  constructor(message: string, path: string) {
     super(`${path}: ${message}`);
+    this.path = path;
     this.name = 'ScenarioValidationError';
   }
 }
@@ -73,6 +76,9 @@ export function validateScenario(data: unknown): Scenario {
   for (let i = 0; i < scenario.locations.length; i++) {
     validateLocation(scenario.locations[i], `locations[${i}]`);
   }
+
+  // D6: cross-location clue prerequisite graph (global id uniqueness + valid, acyclic prereq edges).
+  validateCluePrerequisiteGraph(scenario.locations as InvestigationLocation[]);
 
   // Phases
   if (!Array.isArray(scenario.phases)) {
@@ -234,6 +240,75 @@ function validateClue(clue: unknown, path: string): void {
   }
   if (typeof c.availableInRound !== 'number') {
     throw new ScenarioValidationError('availableInRound must be a number', `${path}.availableInRound`);
+  }
+  if (c.prerequisite !== undefined && typeof c.prerequisite !== 'string') {
+    throw new ScenarioValidationError('prerequisite must be a string', `${path}.prerequisite`);
+  }
+}
+
+/**
+ * D6: validate the cross-location clue prerequisite graph. Enforces GLOBAL clue-id uniqueness, that every
+ * prerequisite references an existing clue id, and that the prerequisite edges form no cycle (WHITE/GRAY/
+ * BLACK DFS). Runs after per-location validation so every clue is already shape-checked.
+ */
+function validateCluePrerequisiteGraph(locations: InvestigationLocation[]): void {
+  // Flatten all clues, enforcing global id uniqueness.
+  const clueById = new Map<string, Clue>();
+  for (let i = 0; i < locations.length; i++) {
+    const clues = locations[i].clues;
+    for (let j = 0; j < clues.length; j++) {
+      const clue = clues[j];
+      if (clueById.has(clue.id)) {
+        throw new ScenarioValidationError(
+          `duplicate clue id "${clue.id}"`,
+          `locations[${i}].clues[${j}].id`,
+        );
+      }
+      clueById.set(clue.id, clue);
+    }
+  }
+
+  // Every non-undefined prerequisite must reference an existing clue id.
+  for (const clue of clueById.values()) {
+    if (clue.prerequisite !== undefined && !clueById.has(clue.prerequisite)) {
+      throw new ScenarioValidationError(
+        `prerequisite "${clue.prerequisite}" references an unknown clue id`,
+        `clues.${clue.id}.prerequisite`,
+      );
+    }
+  }
+
+  // Cycle detection over prerequisite edges via a WHITE/GRAY/BLACK color map.
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<string, number>();
+  for (const id of clueById.keys()) {
+    color.set(id, WHITE);
+  }
+
+  const visit = (id: string): void => {
+    color.set(id, GRAY);
+    const prereq = clueById.get(id)?.prerequisite;
+    if (prereq !== undefined) {
+      const prereqColor = color.get(prereq);
+      if (prereqColor === GRAY) {
+        throw new ScenarioValidationError(
+          `prerequisite graph has a cycle involving clue "${id}"`,
+          `clues.${id}.prerequisite`,
+        );
+      }
+      if (prereqColor === WHITE) {
+        visit(prereq);
+      }
+    }
+    color.set(id, BLACK);
+  };
+
+  for (const id of clueById.keys()) {
+    if (color.get(id) === WHITE) {
+      visit(id);
+    }
   }
 }
 

@@ -22,6 +22,13 @@ function investigationRound(phase: GamePhase): number | null {
   return null;
 }
 
+// D6: a clue is gated behind an optional `prerequisite` clue id. It becomes offerable only once that
+// prerequisite is in `knownClueIds` — the requesting player's OWN known set (their discovered clues ∪
+// the room's public clues). Never consults another player's private discoveries.
+function cluePrerequisiteMet(clue: Clue, knownClueIds: Set<string>): boolean {
+  return clue.prerequisite === undefined || knownClueIds.has(clue.prerequisite);
+}
+
 export interface RoomInvestigationResult {
   locationName: string;
   round: number;
@@ -57,11 +64,17 @@ export function investigateRoom(
     throw new Error('本阶段搜证次数已用完');
   }
 
-  const available = location.clues.filter(clue => clue.availableInRound <= round);
-
   const playerFound = room.discoveredClues[playerId] ?? [];
   const playerFoundIds = new Set(playerFound.map(clue => clue.id));
   const publicFoundIds = new Set(room.publicClues.map(clue => clue.id));
+
+  // D6 prerequisite gating: the player's OWN known set = their discovered clues ∪ the room's public
+  // clues. A gated clue is only offered once its prerequisite is in this set (the pinned decision).
+  const knownClueIds = new Set([...playerFoundIds, ...publicFoundIds]);
+
+  const available = location.clues.filter(
+    clue => clue.availableInRound <= round && cluePrerequisiteMet(clue, knownClueIds),
+  );
 
   // New to THIS player (public clues already revealed publicly are not "new" findings for them).
   const newlyFound = available
@@ -98,6 +111,18 @@ export function investigateRoom(
     content: `【公共线索·${location.name}】${clue.content}`,
     timestamp: Date.now(),
   }));
+
+  // D6 fuzzy hint: if this search turned up ≥1 NEW private clue, broadcast a SINGLE content-free hint
+  // to the whole table. It names ONLY the (already public) location — never the clue content,
+  // significance, id, count, or the finder's playerId. One hint per search, not one per clue.
+  if (newPrivate.length > 0) {
+    systemMessages.push({
+      id: randomUUID(),
+      role: 'system' as const,
+      content: `【搜证】有人在「${location.name}」里似乎发现了什么线索…`,
+      timestamp: Date.now(),
+    });
+  }
 
   // Private clues: only this player's notebook.
   const nextPlayerClues = [...playerFound];

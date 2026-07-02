@@ -14,6 +14,7 @@ process.env.DATABASE_PATH ??= path.join('/tmp', `mm-reveal-test-${process.pid}.d
 
 const { projectRoomForPlayer, tallyVotes, connectedHumanVoteState, applyTieRevote } = await import('../lib/scenarios/projection.ts');
 const { presentClue, investigateRoom, INVESTIGATION_BUDGET } = await import('../lib/game-engine/room-investigation.ts');
+const { validateScenario } = await import('../lib/scenarios/schema.ts');
 
 let pass = 0;
 let fail = 0;
@@ -337,6 +338,120 @@ console.log('C8+C9 projection exposes new fields (public-safe, no secret leak):'
   check('raw votes map is not projected (no pre-reveal who-voted-for-whom)', (view.room as Record<string, unknown>).votes === undefined && view.room.voteCount === 1);
   check('investigationCounts map (player-id-keyed) is not projected', !blob.includes(':INVESTIGATION_1'));
   check('no reveal payload pre-REVEAL', view.reveal === undefined);
+}
+
+// ---- D6: fuzzy hint + prerequisite gating (investigateRoom) ----
+// A dedicated scenario whose 书房 holds two ungated private clues (p1, c1) and one clue (c2) gated behind
+// c1. 'SECRET-SIGNIFICANCE' is the sentinel that MUST never surface in the fuzzy hint.
+const d6Study = {
+  id: 'study',
+  name: '书房',
+  description: 'd',
+  clues: [
+    { id: 'p1', content: '书桌抽屉里的私人信件', type: 'private', significance: 'SECRET-SIGNIFICANCE', availableInRound: 1 },
+    { id: 'c1', content: '壁炉里的灰烬', type: 'private', significance: 'SIG-C1', availableInRound: 1 },
+    { id: 'c2', content: '灰烬下的钥匙', type: 'private', significance: 'SIG-C2', availableInRound: 1, prerequisite: 'c1' },
+  ],
+};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const d6Scenario = { ...scenario, locations: [d6Study] } as any;
+
+console.log('D6 fuzzy hint + prerequisite gating (investigateRoom):');
+{
+  const room = baseRoom({ currentPhase: 'INVESTIGATION_1', characterMemories: {} });
+
+  // Search 1: finds the ungated private clues; the gated c2 is withheld (its prerequisite c1 is unknown).
+  const s1 = investigateRoom(room, d6Scenario, 'P-DET', 'study');
+  const s1ids = s1.result.newlyFound.map((c: { id: string }) => c.id);
+  check('gating: an ungated (no-prerequisite) clue is always offered', s1ids.includes('c1') && s1ids.includes('p1'));
+  check('gating: a gated clue is ABSENT until its prerequisite is found', !s1ids.includes('c2'));
+
+  // Fuzzy hint: exactly one content-free system message naming ONLY 书房.
+  const hints = s1.systemMessages.filter((m: { content: string }) => m.content.includes('似乎发现了什么线索'));
+  check('fuzzy hint: exactly one hint when a search yields ≥1 NEW private clue', hints.length === 1);
+  check('fuzzy hint: role is system', hints[0]?.role === 'system');
+  check('fuzzy hint: names the (public) location 书房', hints[0]?.content.includes('书房') === true);
+  check('fuzzy hint: leaks NO clue significance sentinel', !hints[0]?.content.includes('SECRET-SIGNIFICANCE'));
+  check(
+    'fuzzy hint: leaks NO private clue content',
+    !hints[0]?.content.includes('书桌抽屉里的私人信件') && !hints[0]?.content.includes('壁炉里的灰烬'),
+  );
+  check(
+    'fuzzy hint: leaks NO clue id or finder playerId',
+    !hints[0]?.content.includes('p1') && !hints[0]?.content.includes('P-DET'),
+  );
+  check(
+    'fuzzy hint: appended to nextRoom.groupChatHistory',
+    s1.room.groupChatHistory.some((m: { id: string }) => m.id === hints[0].id),
+  );
+
+  // Search 2 (fresh phase → fresh budget): c1 is now in the player's OWN known set, so gated c2 unlocks.
+  const s2 = investigateRoom({ ...s1.room, currentPhase: 'INVESTIGATION_2' }, d6Scenario, 'P-DET', 'study');
+  const s2ids = s2.result.newlyFound.map((c: { id: string }) => c.id);
+  check('gating: the gated clue c2 is returned once its prerequisite c1 has been discovered', s2ids.includes('c2'));
+  check(
+    'fuzzy hint: fires again for the newly-unlocked c2',
+    s2.systemMessages.filter((m: { content: string }) => m.content.includes('似乎发现了什么线索')).length === 1,
+  );
+
+  // Search 3 (same INVESTIGATION_2, budget remaining): nothing new → NO hint, but budget still increments.
+  const s3 = investigateRoom(s2.room, d6Scenario, 'P-DET', 'study');
+  check('a search that finds no NEW private clue returns zero newly-found clues', s3.result.newlyFound.length === 0);
+  check(
+    'a search finding no NEW private clue produces NO fuzzy hint',
+    s3.systemMessages.filter((m: { content: string }) => m.content.includes('似乎发现了什么线索')).length === 0,
+  );
+  check('budget still increments even when a search returns zero clues', s3.room.investigationCounts?.['P-DET:INVESTIGATION_2'] === 2);
+}
+
+// ---- D6: validateScenario prerequisite-graph validation (schema.ts) ----
+
+console.log('D6 schema: clue prerequisite-graph validation:');
+{
+  function schemaChar(id: string, isKiller: boolean) {
+    return {
+      id, name: `角色-${id}`, age: 30, occupation: '职业', personality: '性格', speakingStyle: '语气',
+      publicInfo: '公开信息'.repeat(20), // ≥ 50 chars
+      privateScript: '私密剧本内容'.repeat(30), // ≥ 100 chars
+      isKiller, relationships: [],
+      objectives: [{ description: '目标', type: 'primary', isSecret: false }],
+      alibi: { claimed: '声称', truth: '真相' }, secrets: ['秘密'],
+    };
+  }
+  function makeSchemaScenario(clues: unknown[]) {
+    return {
+      id: 's', title: 'T', description: 'D',
+      playerCount: { min: 1, max: 4 }, difficulty: 'medium', estimatedDuration: 60,
+      setting: { era: 'e', location: 'l', atmosphere: 'a', backgroundStory: 'b' },
+      case: { victim: 'V', causeOfDeath: 'C', timeOfDeath: '00:00', crimeScene: 'study', truth: 'T', murderMethod: 'M', motive: 'Mo' },
+      characters: [schemaChar('k', true), schemaChar('d', false)],
+      locations: [{ id: 'study', name: '书房', description: 'd', clues }],
+      phases: [], timeline: [],
+    };
+  }
+  const clue = (id: string, extra: Record<string, unknown> = {}) =>
+    ({ id, content: `内容-${id}`, type: 'private', significance: `SIG-${id}`, availableInRound: 1, ...extra });
+
+  function throwsValidate(clues: unknown[]): boolean {
+    try {
+      validateScenario(makeSchemaScenario(clues));
+      return false;
+    } catch (e) {
+      return e instanceof Error;
+    }
+  }
+
+  check(
+    'accepts a valid acyclic prerequisite chain c1→c2→c3',
+    !throwsValidate([clue('c1'), clue('c2', { prerequisite: 'c1' }), clue('c3', { prerequisite: 'c2' })]),
+  );
+  check('throws on an unknown prerequisite reference', throwsValidate([clue('c1', { prerequisite: 'ghost' })]));
+  check('throws on a duplicate global clue id', throwsValidate([clue('dup'), clue('dup')]));
+  check(
+    'throws on a prerequisite cycle (c1↔c2)',
+    throwsValidate([clue('c1', { prerequisite: 'c2' }), clue('c2', { prerequisite: 'c1' })]),
+  );
+  check('throws on a non-string prerequisite', throwsValidate([clue('c1', { prerequisite: 123 })]));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
