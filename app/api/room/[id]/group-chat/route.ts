@@ -7,6 +7,7 @@ import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { publish } from '@/lib/realtime/room-bus';
+import { runExclusive } from '@/lib/realtime/room-lock';
 import type { ChatMessage } from '@/types/game';
 
 export const maxDuration = 300;
@@ -82,56 +83,69 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       publish(id, { type: 'group_message', message: playerMessage });
     }
 
-    // 2. Stream NPC responses, broadcasting to everyone; persist each as it finishes.
-    const fresh = getRoom(id);
-    if (fresh) {
-      const accumulated = new Map<string, string>();
-      let active: string | null = null;
-
-      for await (const item of manageRoomGroupResponse(fresh, scenario, message)) {
-        if (item.characterId !== active) {
-          active = item.characterId;
-          accumulated.set(item.characterId, '');
-          publish(id, { type: 'npc_start', characterId: item.characterId });
-        }
-        accumulated.set(item.characterId, (accumulated.get(item.characterId) ?? '') + item.text);
-        publish(id, { type: 'npc_chunk', characterId: item.characterId, text: item.text });
+    // 2. Stream NPC responses. Serialized per-room (C1) so two concurrent turns never interleave
+    //    `npc_*` events. The human line above was already posted+broadcast BEFORE the lock, so player
+    //    lines stay immediate and in order; only this NPC block is exclusive.
+    //    `turnId` identifies this POST's turn; each responder carries a stable `messageId` (reused as
+    //    the persisted ChatMessage.id) so the client can key + dedup its streaming bubble. Each
+    //    `npc_start` is followed by exactly one terminal `npc_done` OR `npc_error` for that messageId.
+    const turnId = randomUUID();
+    await runExclusive(id, async () => {
+      const fresh = getRoom(id);
+      if (!fresh) {
+        return;
       }
 
-      for (const [characterId, text] of accumulated) {
-        const trimmed = text.trim();
-        if (!trimmed) {
-          continue;
-        }
-        const npcMessage: ChatMessage = {
-          id: randomUUID(),
-          role: 'npc',
-          characterId,
-          content: trimmed,
-          timestamp: Date.now(),
-        };
+      for await (const event of manageRoomGroupResponse(fresh, scenario, message)) {
+        const { characterId, messageId } = event;
+        switch (event.kind) {
+          case 'start':
+            publish(id, { type: 'npc_start', turnId, messageId, characterId });
+            break;
+          case 'chunk':
+            publish(id, { type: 'npc_chunk', turnId, messageId, characterId, text: event.text });
+            break;
+          case 'error':
+            publish(id, { type: 'npc_error', turnId, messageId, characterId, reason: event.reason });
+            break;
+          case 'done': {
+            const trimmed = event.content.trim();
+            const npcMessage: ChatMessage = {
+              id: messageId,
+              role: 'npc',
+              characterId,
+              content: trimmed,
+              timestamp: Date.now(),
+            };
 
-        updateRoom(id, current => {
-          const memory = current.characterMemories[characterId];
-          let nextMemory = memory;
-          if (memory) {
-            if (message) {
-              nextMemory = appendConversation(nextMemory, { role: 'player', content: message, characterId });
+            // C6: never persist an empty/whitespace-only turn — but still emit the terminal npc_done
+            // so the client can always clear the streaming bubble (C4).
+            if (trimmed) {
+              updateRoom(id, current => {
+                const memory = current.characterMemories[characterId];
+                let nextMemory = memory;
+                if (memory) {
+                  if (message) {
+                    nextMemory = appendConversation(nextMemory, { role: 'player', content: message, characterId });
+                  }
+                  nextMemory = appendConversation(nextMemory, { role: 'npc', content: trimmed, characterId });
+                }
+                return {
+                  ...current,
+                  groupChatHistory: [...current.groupChatHistory, npcMessage],
+                  characterMemories: nextMemory
+                    ? { ...current.characterMemories, [characterId]: nextMemory }
+                    : current.characterMemories,
+                };
+              });
             }
-            nextMemory = appendConversation(nextMemory, { role: 'npc', content: trimmed, characterId });
-          }
-          return {
-            ...current,
-            groupChatHistory: [...current.groupChatHistory, npcMessage],
-            characterMemories: nextMemory
-              ? { ...current.characterMemories, [characterId]: nextMemory }
-              : current.characterMemories,
-          };
-        });
 
-        publish(id, { type: 'npc_done', characterId, message: npcMessage });
+            publish(id, { type: 'npc_done', turnId, messageId, characterId, message: npcMessage });
+            break;
+          }
+        }
       }
-    }
+    });
 
     return Response.json({ ok: true });
   } catch (error) {
