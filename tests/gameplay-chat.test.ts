@@ -13,10 +13,15 @@ process.env.ROOM_AUTH_SECRET ??= 'test-secret-for-seat-auth';
 delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 delete process.env.ANTHROPIC_API_KEY;
 
-import type { Character, CharacterMemory, SuspicionRecord } from '@/types/game';
+import type { Character, CharacterMemory, GamePhase, Room, Scenario, SuspicionRecord } from '@/types/game';
+import type { GroupResponseDeps, NpcTurnEvent } from '../lib/agents/room-group-chat.ts';
 
 const { getPhaseConfig } = await import('../lib/game-engine/phase-manager.ts');
 const { computeNpcVote, tryReserveNpcTrigger } = await import('../lib/agents/npc-voter.ts');
+// room-group-chat is deliberately strip-types-loadable (it lazy-imports npc-agent), so we can drive
+// the group-turn generator offline. No LLM is configured here (keys deleted above), so the default
+// path takes the not-configured branch; the success/failure paths are exercised via injected deps.
+const { manageRoomGroupResponse } = await import('../lib/agents/room-group-chat.ts');
 
 let pass = 0;
 let fail = 0;
@@ -143,6 +148,155 @@ for (let i = 0; i < 8; i += 1) {
   }
 }
 check('token bucket caps a same-instant burst at capacity (6)', allowed === 6);
+
+// ── C1 / C4 / C6: group-turn generator (turn/message ids + error handling) ────
+// These run fully offline: `manageRoomGroupResponse` owns the gate/throttle/not-configured decisions
+// and per-responder start→chunk→done|error events; the route (not exercised here) owns turnId, the
+// per-room lock, SSE mapping, and persistence.
+console.log('Group-chat turn generator (C1/C4/C6):');
+
+function makeGroupScenario(characters: Character[]): Scenario {
+  return {
+    id: 'scn-test',
+    title: '测试本',
+    description: '用于离线测试的最小剧本',
+    playerCount: { min: 1, max: 6 },
+    difficulty: 'easy',
+    estimatedDuration: 60,
+    setting: { era: '现代', location: '山庄', atmosphere: '紧张', backgroundStory: '暴风雪封山' },
+    case: {
+      victim: '死者',
+      causeOfDeath: '中毒',
+      timeOfDeath: '午夜',
+      crimeScene: '书房',
+      truth: 'SECRET-TRUTH',
+      murderMethod: 'SECRET-METHOD',
+      motive: 'SECRET-MOTIVE',
+    },
+    characters,
+    locations: [],
+    phases: [],
+    timeline: [],
+  };
+}
+
+function makeGroupRoom(id: string, phase: GamePhase, npc: Character): Room {
+  return {
+    id,
+    code: 'CODE',
+    scenarioId: 'scn-test',
+    status: 'in_progress',
+    currentPhase: phase,
+    round: 1,
+    hostPlayerId: 'host',
+    players: [],
+    characterControl: { [npc.id]: { kind: 'npc' } },
+    characterMemories: { [npc.id]: makeMemory(npc.id, []) },
+    discoveredClues: {},
+    publicClues: [],
+    groupChatHistory: [],
+    privateChats: {},
+    votes: {},
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+async function* gen(chunks: string[]): AsyncIterable<string> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
+
+async function* throwingGen(): AsyncIterable<string> {
+  yield '开始'; // a partial chunk...
+  throw new Error('simulated provider failure'); // ...then fail mid-generation
+}
+
+async function collectTurn(iter: AsyncIterable<NpcTurnEvent>): Promise<NpcTurnEvent[]> {
+  const out: NpcTurnEvent[] = [];
+  for await (const event of iter) {
+    out.push(event);
+  }
+  return out;
+}
+
+const groupNpc = makeCharacter('npc1', '甲');
+const groupScenario = makeGroupScenario([groupNpc]);
+let roomSeq = 0;
+function freshGroupRoom(phase: GamePhase = 'DISCUSSION_1'): Room {
+  roomSeq += 1;
+  // Unique id per room ⇒ a fresh throttle bucket, so first triggers are always allowed.
+  return makeGroupRoom(`group-room-${Date.now()}-${roomSeq}`, phase, groupNpc);
+}
+
+// C6: with no LLM configured (default deps), a triggered turn is a single terminal error and nothing
+// gets streamed or persisted.
+const notConfigured = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), groupScenario, '大家好'));
+const ncFirst = notConfigured[0];
+check('no-LLM turn yields exactly one event', notConfigured.length === 1);
+check(
+  'no-LLM turn yields a single not_configured error',
+  !!ncFirst && ncFirst.kind === 'error' && ncFirst.reason === 'not_configured',
+);
+check('no-LLM turn yields zero done events', notConfigured.every(event => event.kind !== 'done'));
+check('no-LLM turn emits no per-NPC start (turn-level error only)', notConfigured.every(event => event.kind !== 'start'));
+
+// C1/C4: a successful responder emits start → chunk(s) → exactly one done, all sharing one messageId.
+const okDeps: GroupResponseDeps = {
+  isConfigured: () => true,
+  streamResponse: () => gen(['你好', '，我是', '甲。']),
+};
+const okEvents = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), groupScenario, '大家好', okDeps));
+const okStarts = okEvents.filter(event => event.kind === 'start');
+const okChunks = okEvents.filter(event => event.kind === 'chunk');
+const okDones = okEvents.filter(event => event.kind === 'done');
+const okDone = okDones[0];
+check('success turn: exactly one start', okStarts.length === 1);
+check('success turn: exactly one done and no error', okDones.length === 1 && okEvents.every(event => event.kind !== 'error'));
+check('success turn: every non-empty chunk is streamed', okChunks.length === 3);
+check('messageId is stable across start/chunk/done for a responder', new Set(okEvents.map(event => event.messageId)).size === 1);
+check(
+  'done.content is the concatenation of the streamed chunks',
+  !!okDone && okDone.kind === 'done' && okDone.content === '你好，我是甲。',
+);
+
+// C6/C4: a mid-generation failure yields a terminal error (never a done, never a partial persist).
+const failDeps: GroupResponseDeps = {
+  isConfigured: () => true,
+  streamResponse: () => throwingGen(),
+};
+const failEvents = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), groupScenario, '你说说', failDeps));
+const failStart = failEvents.find(event => event.kind === 'start');
+const failErrors = failEvents.filter(event => event.kind === 'error');
+const failErr = failErrors[0];
+check('failed turn: emits a start then exactly one terminal error', !!failStart && failErrors.length === 1);
+check('failed turn: no done event (never persist a partial message)', failEvents.every(event => event.kind !== 'done'));
+check('failed turn: error reason is "failed"', !!failErr && failErr.kind === 'error' && failErr.reason === 'failed');
+check(
+  'failed turn: terminal error shares the responder messageId with its start',
+  !!failStart && !!failErr && failStart.messageId === failErr.messageId,
+);
+
+// C4: empty/whitespace-only output is still terminal (a done) — the client can always clear the bubble.
+const emptyDeps: GroupResponseDeps = {
+  isConfigured: () => true,
+  streamResponse: () => gen(['   ']),
+};
+const emptyEvents = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), groupScenario, '……', emptyDeps));
+check('empty/whitespace turn still emits a terminal done (C4)', emptyEvents.some(event => event.kind === 'done'));
+check('empty/whitespace turn emits no error', emptyEvents.every(event => event.kind !== 'error'));
+
+// Gate: a chat-blocked phase yields nothing, even when configured.
+const gated = await collectTurn(manageRoomGroupResponse(freshGroupRoom('READING'), groupScenario, '大家好', okDeps));
+check('chat-gated phase (READING) yields nothing', gated.length === 0);
+
+// Throttle: a second immediate unprompted trigger for the same room is suppressed (yields nothing).
+const throttleRoom = makeGroupRoom(`group-throttle-${Date.now()}`, 'DISCUSSION_1', groupNpc);
+const throttleFirst = await collectTurn(manageRoomGroupResponse(throttleRoom, groupScenario, '第一句', okDeps));
+const throttleSecond = await collectTurn(manageRoomGroupResponse(throttleRoom, groupScenario, '第二句', okDeps));
+check('throttle: first unprompted trigger produces a turn', throttleFirst.some(event => event.kind === 'start'));
+check('throttle: second immediate unprompted trigger yields nothing', throttleSecond.length === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -14,9 +14,14 @@ export type RoomEvent =
   | { type: 'room_state' } // signal: refetch projected /state (roster / lobby / status changed)
   | { type: 'phase_change'; phase: string; round: number }
   | { type: 'group_message'; message: ChatMessage }
-  | { type: 'npc_start'; characterId: string }
-  | { type: 'npc_chunk'; characterId: string; text: string }
-  | { type: 'npc_done'; characterId: string; message: ChatMessage }
+  // NPC group-chat streaming. Every event carries `turnId` (one per group-chat POST) + `messageId`
+  // (stable across a single responder's start→chunk→done, and reused as the persisted ChatMessage.id
+  // so the client can key its streaming bubble and dedup it against /state). Each `npc_start` is
+  // eventually followed by exactly one terminal `npc_done` OR `npc_error` for the same `messageId`.
+  | { type: 'npc_start'; turnId: string; messageId: string; characterId: string }
+  | { type: 'npc_chunk'; turnId: string; messageId: string; characterId: string; text: string }
+  | { type: 'npc_done'; turnId: string; messageId: string; characterId: string; message: ChatMessage }
+  | { type: 'npc_error'; turnId: string; messageId: string; characterId: string; reason: 'not_configured' | 'failed' }
   | { type: 'clue_public'; message: ChatMessage }
   | { type: 'vote_update'; voteCount: number }
   | { type: 'reveal' };
