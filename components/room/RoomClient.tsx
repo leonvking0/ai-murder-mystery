@@ -25,6 +25,17 @@ interface RoomClientProps {
 
 type LoadState = 'resolving' | 'need-join' | 'ready' | 'error';
 
+// C1/C4: an in-flight NPC streaming bubble, tracked per messageId.
+interface StreamBubble {
+  characterId: string;
+  turnId: string;
+  text: string;
+  updatedAt: number;
+}
+
+// How long (ms) a streaming entry may go without an update before the sweep drops it (C4 safety net).
+const STREAM_STALE_MS = 30_000;
+
 const DISCUSSION_PHASES = new Set(['DISCUSSION_1', 'DISCUSSION_2', 'FINAL_DISCUSSION']);
 const INVESTIGATION_PHASES = new Set(['INVESTIGATION_1', 'INVESTIGATION_2']);
 
@@ -41,10 +52,20 @@ export function RoomClient({ code }: RoomClientProps) {
   const [chatTab, setChatTab] = useState<'group' | 'private'>('group');
 
   const [liveMessages, setLiveMessages] = useState<ChatMessage[]>([]);
-  const [streaming, setStreaming] = useState<{ characterId: string; text: string } | null>(null);
+  // C1/C4: one streaming bubble per in-flight NPC message, keyed by messageId. Multiple NPCs can
+  // stream at once within a turn; entries are removed on the terminal npc_done/npc_error, on
+  // phase_change/reveal, or by the stale-entry sweep below.
+  const [streamingBubbles, setStreamingBubbles] = useState<Map<string, StreamBubble>>(new Map());
+  // C3: SSE connection health banner + a transient notice for NPC failures.
+  const [disconnected, setDisconnected] = useState(false);
+  const [npcNotice, setNpcNotice] = useState<string | null>(null);
+  // C2: host "强制推进" affordance, revealed only after the server reports awaiting_votes.
+  const [forceAdvance, setForceAdvance] = useState(false);
 
   const playerIdRef = useRef<string | null>(null);
   playerIdRef.current = playerId;
+  // C11: monotonic guard so a slow earlier /state response can't overwrite newer state.
+  const refetchSeqRef = useRef(0);
 
   // 1. Resolve code → roomId, recover identity.
   useEffect(() => {
@@ -64,7 +85,12 @@ export function RoomClient({ code }: RoomClientProps) {
         setRoomId(data.roomId);
         const existing = getPlayerId(data.roomId);
         if (existing) {
+          // A returning player (has a seat) may reconnect into an in-progress or finished game.
           setPlayerIdState(existing);
+        } else if (data.status !== 'lobby') {
+          // C5: no local identity + the room already started/ended → block the join form.
+          setError(data.status === 'finished' ? '本局游戏已结束' : '游戏已经开始，无法加入');
+          setLoadState('error');
         } else {
           setLoadState('need-join');
         }
@@ -86,8 +112,13 @@ export function RoomClient({ code }: RoomClientProps) {
     if (!rid || !pid) {
       return;
     }
+    // C11: stamp this request; only the newest in-flight fetch may commit to state.
+    const seq = ++refetchSeqRef.current;
     // Auth is the httpOnly cookie (sent automatically for same-origin) — never a ?playerId= query.
     const res = await fetch(`/api/room/${rid}/state`, { cache: 'no-store' });
+    if (seq !== refetchSeqRef.current) {
+      return;
+    }
     if (res.status === 403) {
       // Missing/stale seat cookie → force rejoin (also clears our local bookkeeping).
       setPlayerIdState(null);
@@ -96,6 +127,9 @@ export function RoomClient({ code }: RoomClientProps) {
     }
     if (res.ok) {
       const data = (await res.json()) as PlayerRoomView;
+      if (seq !== refetchSeqRef.current) {
+        return;
+      }
       setView(data);
       setLoadState('ready');
     }
@@ -108,13 +142,37 @@ export function RoomClient({ code }: RoomClientProps) {
     }
   }, [roomId, playerId, refetchState]);
 
-  // 3. Realtime via EventSource.
+  // 3. Realtime via EventSource. C3: EventSource auto-reconnects, but we also fall back to a
+  // low-frequency /state poll while the stream is down and surface a reconnecting banner.
   useEffect(() => {
     if (!roomId || !playerId) {
       return;
     }
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const stopPoll = () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    const startPoll = () => {
+      if (pollTimer === null) {
+        pollTimer = setInterval(() => {
+          refetchState();
+        }, 5000);
+      }
+    };
     // EventSource sends the same-origin httpOnly seat cookie automatically — no query token needed.
     const source = new EventSource(`/api/room/${roomId}/events`);
+    source.onopen = () => {
+      setDisconnected(false);
+      stopPoll();
+    };
+    source.onerror = () => {
+      // The browser keeps retrying under the hood; show a banner + poll until onopen fires again.
+      setDisconnected(true);
+      startPoll();
+    };
     source.onmessage = event => {
       let payload: { type: string; [key: string]: unknown };
       try {
@@ -124,9 +182,13 @@ export function RoomClient({ code }: RoomClientProps) {
       }
       switch (payload.type) {
         case 'room_state':
+        case 'vote_update':
+          refetchState();
+          break;
         case 'phase_change':
         case 'reveal':
-        case 'vote_update':
+          // C4: a phase change (or the reveal) ends any in-flight turn — drop ghost bubbles.
+          setStreamingBubbles(prev => (prev.size === 0 ? prev : new Map()));
           refetchState();
           break;
         case 'group_message':
@@ -134,24 +196,98 @@ export function RoomClient({ code }: RoomClientProps) {
           setLiveMessages(prev => [...prev, payload.message as ChatMessage]);
           break;
         case 'npc_start':
-          setStreaming({ characterId: payload.characterId as string, text: '' });
+          setStreamingBubbles(prev => {
+            const next = new Map(prev);
+            next.set(payload.messageId as string, {
+              characterId: payload.characterId as string,
+              turnId: payload.turnId as string,
+              text: '',
+              updatedAt: Date.now(),
+            });
+            return next;
+          });
           break;
         case 'npc_chunk':
-          setStreaming(prev => ({
-            characterId: payload.characterId as string,
-            text: (prev?.text ?? '') + (payload.text as string),
-          }));
+          setStreamingBubbles(prev => {
+            const messageId = payload.messageId as string;
+            const existing = prev.get(messageId);
+            const next = new Map(prev);
+            next.set(messageId, {
+              characterId: existing?.characterId ?? (payload.characterId as string),
+              turnId: existing?.turnId ?? (payload.turnId as string),
+              text: (existing?.text ?? '') + (payload.text as string),
+              updatedAt: Date.now(),
+            });
+            return next;
+          });
           break;
         case 'npc_done':
+          // Terminal: remove the bubble and persist the finished message (dedups by id downstream).
+          setStreamingBubbles(prev => {
+            const messageId = payload.messageId as string;
+            if (!prev.has(messageId)) {
+              return prev;
+            }
+            const next = new Map(prev);
+            next.delete(messageId);
+            return next;
+          });
           setLiveMessages(prev => [...prev, payload.message as ChatMessage]);
-          setStreaming(null);
+          break;
+        case 'npc_error':
+          // Terminal failure: drop the bubble (never persist it) and flash a brief notice.
+          setStreamingBubbles(prev => {
+            const messageId = payload.messageId as string;
+            if (!prev.has(messageId)) {
+              return prev;
+            }
+            const next = new Map(prev);
+            next.delete(messageId);
+            return next;
+          });
+          setNpcNotice(payload.reason === 'not_configured' ? 'AI 未配置，无法回复' : '有角色回复失败');
           break;
         default:
           break;
       }
     };
-    return () => source.close();
+    return () => {
+      stopPoll();
+      source.close();
+    };
   }, [roomId, playerId, refetchState]);
+
+  // C4 safety net: drop any streaming bubble that hasn't received an update recently (e.g. a
+  // dropped connection that never delivered its terminal event) so it can't linger forever.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStreamingBubbles(prev => {
+        if (prev.size === 0) {
+          return prev;
+        }
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [id, bubble] of next) {
+          if (now - bubble.updatedAt > STREAM_STALE_MS) {
+            next.delete(id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Auto-dismiss the transient NPC failure notice.
+  useEffect(() => {
+    if (!npcNotice) {
+      return;
+    }
+    const timer = setTimeout(() => setNpcNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [npcNotice]);
 
   // Merge persisted history + live events, dedup by id, sort by time.
   const groupMessages = useMemo(() => {
@@ -164,6 +300,17 @@ export function RoomClient({ code }: RoomClientProps) {
     }
     return [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
   }, [view?.room.groupChatHistory, liveMessages]);
+
+  // C1: flatten the per-messageId bubble map into a render list (stable id → React key).
+  const streamingList = useMemo(
+    () =>
+      [...streamingBubbles.entries()].map(([id, bubble]) => ({
+        id,
+        characterId: bubble.characterId,
+        text: bubble.text,
+      })),
+    [streamingBubbles],
+  );
 
   const doJoin = async () => {
     if (!roomId || joining) {
@@ -190,7 +337,9 @@ export function RoomClient({ code }: RoomClientProps) {
     }
   };
 
-  const action = useCallback(
+  // Low-level POST that never throws — callers inspect status/code themselves (used by doAdvance
+  // for the 409 stale_phase / 400 awaiting_votes flows). `data` is loosely typed like res.json().
+  const actionRaw = useCallback(
     async (path: string, body: Record<string, unknown>) => {
       if (!roomId || !playerId) {
         return null;
@@ -202,12 +351,24 @@ export function RoomClient({ code }: RoomClientProps) {
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error ?? '操作失败');
-      }
-      return data;
+      return { ok: res.ok, status: res.status, data };
     },
     [roomId, playerId],
+  );
+
+  // Throwing wrapper preserved for every existing caller (start/kick/group-chat/investigate/…).
+  const action = useCallback(
+    async (path: string, body: Record<string, unknown>) => {
+      const result = await actionRaw(path, body);
+      if (!result) {
+        return null;
+      }
+      if (!result.ok) {
+        throw new Error(result.data?.error ?? '操作失败');
+      }
+      return result.data;
+    },
+    [actionRaw],
   );
 
   const doStart = async () => {
@@ -223,12 +384,36 @@ export function RoomClient({ code }: RoomClientProps) {
     }
   };
 
-  const doAdvance = async () => {
+  // C2: `force === true` is only ever passed by the explicit "强制推进" button — comparing against
+  // `true` (not truthiness) means an accidental MouseEvent arg from onClick never forces.
+  const doAdvance = async (force?: boolean) => {
+    if (busy) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await action('advance', {});
-      await refetchState();
+      const result = await actionRaw('advance', {
+        expectedPhase: view?.room.currentPhase,
+        ...(force === true ? { force: true } : {}),
+      });
+      if (!result) {
+        return;
+      }
+      if (result.ok) {
+        setForceAdvance(false);
+        await refetchState();
+      } else if (result.data?.code === 'stale_phase') {
+        // 409: the room already moved on — benign, just resync silently.
+        setForceAdvance(false);
+        await refetchState();
+      } else if (result.data?.code === 'awaiting_votes') {
+        // 400: not all connected humans voted — offer the host a force affordance.
+        setForceAdvance(true);
+        setError(result.data?.error ?? '仍有玩家未投票。');
+      } else {
+        setError(result.data?.error ?? '推进失败');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '推进失败');
     } finally {
@@ -253,8 +438,14 @@ export function RoomClient({ code }: RoomClientProps) {
   };
 
   const sendPrivate = async (characterId: string, message: string) => {
-    await action('private-chat', { targetCharacterId: characterId, message });
-    await refetchState();
+    // C11: surface failures via setError instead of leaving an unhandled rejection; the panel still
+    // gets a resolved Promise<void> so its own "sending" state clears.
+    try {
+      await action('private-chat', { targetCharacterId: characterId, message });
+      await refetchState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '发送失败');
+    }
   };
 
   const investigate = async (
@@ -266,8 +457,13 @@ export function RoomClient({ code }: RoomClientProps) {
   };
 
   const vote = async (characterId: string) => {
-    await action('vote', { accusedCharacterId: characterId });
-    await refetchState();
+    // C11: same contract as sendPrivate — errors surface via setError, promise still resolves.
+    try {
+      await action('vote', { accusedCharacterId: characterId });
+      await refetchState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '投票失败');
+    }
   };
 
   const presentClue = async (clueId: string) => {
@@ -335,14 +531,38 @@ export function RoomClient({ code }: RoomClientProps) {
               </span>
             )}
             {showAdvance && (
-              <Button onClick={doAdvance} disabled={busy} className="bg-amber-700 text-amber-50 hover:bg-amber-600">
+              <Button onClick={() => doAdvance()} disabled={busy} className="bg-amber-700 text-amber-50 hover:bg-amber-600">
                 {busy ? '...' : advanceLabel}
+              </Button>
+            )}
+            {showAdvance && forceAdvance && (
+              <Button
+                onClick={() => doAdvance(true)}
+                disabled={busy}
+                variant="outline"
+                className="border-rose-500/50 bg-rose-900/20 text-rose-100 hover:bg-rose-900/40"
+              >
+                强制推进
               </Button>
             )}
           </div>
         </header>
 
         {inProgress && <div className="mb-4"><PhaseIndicator phase={phase} /></div>}
+        {(disconnected || npcNotice) && (
+          <div className="mb-4 flex flex-wrap justify-center gap-2">
+            {disconnected && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-900/20 px-3 py-1 text-xs text-amber-200">
+                连接中断，正在重连…
+              </span>
+            )}
+            {npcNotice && (
+              <span className="rounded-full border border-rose-500/30 bg-rose-900/20 px-3 py-1 text-xs text-rose-200">
+                {npcNotice}
+              </span>
+            )}
+          </div>
+        )}
         {error && (
           <p className="mb-4 rounded-lg border border-red-500/40 bg-red-900/20 px-3 py-2 text-sm text-red-200">{error}</p>
         )}
@@ -363,7 +583,7 @@ export function RoomClient({ code }: RoomClientProps) {
                 <TabButton active={chatTab === 'private'} onClick={() => setChatTab('private')}>私聊 AI</TabButton>
               </div>
               {chatTab === 'group' ? (
-                <GroupChatPanel view={view} messages={groupMessages} streaming={streaming} onSend={sendGroup} />
+                <GroupChatPanel view={view} messages={groupMessages} streaming={streamingList} onSend={sendGroup} />
               ) : (
                 <PrivateChatPanel view={view} onSend={sendPrivate} />
               )}
