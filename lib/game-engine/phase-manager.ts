@@ -42,7 +42,7 @@ export const PHASE_NARRATIONS: Record<GamePhase, string> = {
   DISCUSSION_2: '第二轮讨论开始，请结合新线索核对口供矛盾。',
   INVESTIGATION_2: '第二轮搜证开始，关键证据已开放，重点破解密室与毒物来源。',
   FINAL_DISCUSSION: '最终讨论开始，请整合完整时间线并锁定唯一怀疑对象。',
-  VOTING: '请进行最终指认，并给出证据链。',
+  VOTING: '最终指认开始：投票已开放，但在主持人推进前你仍可更改。请把握最后的申辩回合，完成质询与辩护，并给出完整证据链。',
   REVEAL: '真相揭晓阶段开始。GM将复盘作案过程与所有关键误导点。',
 };
 
@@ -97,7 +97,10 @@ const PHASE_CONFIGS: Record<GamePhase, PhaseCapabilityConfig> = {
   },
   VOTING: {
     description: '投票指认凶手并提交证据',
-    allowsChat: false,
+    // D5(a): chat stays OPEN during VOTING so a defense round can run concurrently with balloting —
+    // NPC responses + present-clue reuse this same gate. Votes remain changeable until the host
+    // advances (no lock / no sub-state — pinned decision).
+    allowsChat: true,
     allowsInvestigation: false,
     allowsVoting: true,
   },
