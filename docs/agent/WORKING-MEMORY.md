@@ -2,6 +2,46 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-02 — Backlog Batch C (robustness) IMPLEMENTED & MERGED
+
+**State:** Green on `main` @ f9da7fc. `npm test` = **156 checks** (info-isolation 57 + gameplay-chat 37 +
+gameplay-reveal 62), tsc/eslint clean, authoritative Turbopack `npm run build` verified on the integrated main.
+
+**What landed (4 PRs, same multi-agent orchestration — opus-4.8 workers in git worktrees, Fable audited every
+diff for the isolation invariant + squash-merged; two waves, disjoint file sets within each wave):**
+- **Wave 1 (parallel):**
+  - **PR #7** — ENGINE (C2/C8/C9): idempotent advance (`expectedPhase`→409 `stale_phase`); per-phase
+    investigation budget (`INVESTIGATION_BUDGET=2`, `Room.investigationCounts`); voting integrity —
+    all-connected-humans-voted gate (`canAdvanceRoom(room,{force})`) + host `force` + tie→one revote
+    (`voteRevoteCount`). Shared pure `tallyVotes`/`connectedHumanVoteState`/`applyTieRevote` in
+    `projection.ts` (NOT room-engine — strip-types loadability), reused by `buildReveal`.
+  - **PR #8** — CHAT (C1/C4-server/C6): per-room turn mutex (`lib/realtime/room-lock.ts` `runExclusive`);
+    `npc_*` events now carry `turnId`+`messageId`; per-NPC persist + `npc_done` as each stream finishes;
+    new `npc_error` (`not_configured` vs `failed`), never persist failed/partial turns. Generator yields a
+    tagged `NpcTurnEvent` union + lazy-imports npc-agent + has a `deps` test seam.
+- **Wave 2 (parallel, off merged Wave-1 main):**
+  - **PR #9** — FRONT (C1-client/C2-client/C3/C4-client/C5/C8/C9-UI/C11): streaming bubbles keyed by
+    `messageId` (multi-NPC) + terminal/stale clearing; SSE `onopen`/`onerror` reconnect banner + 5s `/state`
+    poll fallback; join-status gate; advance busy-guard + `expectedPhase` (409 silent, 400 `awaiting_votes`→
+    host "强制推进" with `force===true` guard); investigation-budget + vote-progress/revote UI; `.catch` on
+    private/vote + monotonic `refetchState` seq guard.
+  - **PR #10** — MEMORY (C7/C10): **C7 isolation fix** — private-chat turns no longer write to shared
+    `characterMemories` (they'd leak player A's private line into player B's NPC prompt); the isolated
+    `privateChats[playerId:characterId]` thread is the sole private history. Speaker/channel/round labeling
+    in `appendConversation`. C10: in-turn groupContext rebuild between speakers; private history capped to
+    last 16 for the model; shared NPC memory compacted via `summarizeConversations` (offline-safe) past 20
+    entries. Regression test (info-isolation 45→57) with a positive control + sentinel.
+
+**Deferred follow-ups (small, noted in BACKLOG):** first-come-exclusive private clues (C8 optional part);
+signed reconnect cookie to rebind a seat (C5/D2); private-chat not-configured still returns a canned line
+(KI-059, Batch E); the compaction read-modify-write can, in theory, race a concurrent `present-clue`
+knownFacts merge during a discussion phase — narrow window, only clobbers a re-derivable public clue fact,
+self-healing (Batch E nit).
+
+**Next up:** Batch D (gameplay depth — always-on case/script drawer, disconnect takeover + host handoff,
+discussion liveness, activate emotion/suspicion, voting-integrity UX, investigation depth) or Batch E
+(robustness lows & housekeeping). See BACKLOG.md.
+
 ## Snapshot — 2026-07-01 (evening) — Backlog Batch A + B IMPLEMENTED & MERGED
 
 **State:** Green. `npm test` now runs 3 files = **90 checks, all pass** (info-isolation 45 + gameplay-chat 19

@@ -104,3 +104,41 @@ and `EventSource` sends it automatically for same-origin `/events`, so no client
 fallback. Cookies are per-room, so one browser can hold several seats. `Player` gains a `publicId`;
 clients key/render off `publicId`/`isSelf` instead of `id`. localStorage `playerId` remains only as UX
 bookkeeping ("have I joined this room"), never as an auth credential.
+
+## 2026-07-02 — Per-message NPC streaming contract + per-room turn mutex — Accepted
+**Context:** Group-chat streamed `npc_start/npc_chunk/npc_done` events carrying only `characterId`, the
+route persisted all NPC replies only after the whole turn's generator finished, and there was no
+per-room serialization. Two messages within ~1-2s ran overlapping `manageRoomGroupResponse` generators
+whose events interleaved with no way to tell them apart; the client's single streaming slot rendered
+mixed A+B text; a mid-turn crash dropped all already-broadcast replies (KI-035). There was also no way
+to signal an NPC-level failure (KI-044).
+**Decision:** (1) A per-room in-process turn mutex (`lib/realtime/room-lock.ts` `runExclusive`, a
+promise-chain hung off `globalThis` to survive HMR) serializes only the NPC generate-and-broadcast
+block; the human's own message is posted/broadcast *before* the lock so player lines stay immediate.
+(2) Every `npc_*` event carries `turnId` (one per POST) + `messageId` (stable across a responder's
+start→chunk→done, reused as the persisted `ChatMessage.id` so the client keys its streaming bubble and
+dedups against `/state`). (3) Persist + `npc_done` per NPC as each stream finishes, not at turn end.
+(4) New `npc_error{reason:'not_configured'|'failed'}`; failed/partial turns are never persisted, and
+`streamNPCGroupResponse` no longer swallows provider errors into a canned line — the caller decides.
+The generator yields a tagged `NpcTurnEvent` union and lazy-imports `npc-agent` (which statically pulls
+in `@/data/*.json`) so it stays loadable under `node --experimental-strip-types` for offline tests; a
+`deps` seam injects fakes for the config/stream in tests.
+**Consequences:** The client must support multiple simultaneous streaming bubbles (a `Map<messageId,…>`)
+and treat each `npc_start` as followed by exactly one terminal `npc_done|npc_error`. Same-room turns run
+strictly one-at-a-time (acceptable — discussion is turn-based); different rooms never block each other.
+
+## 2026-07-02 — Private-chat NPC memory is isolated per (playerId, characterId) — Accepted
+**Context:** The private-chat route appended both the player's line and the NPC's reply into the SHARED
+`characterMemories[characterId].conversations`, which `formatPersonalMemory` renders into *every*
+player's prompt for that NPC. So player A's private line to an NPC leaked into player B's prompt/replies
+for that NPC — a player-to-player information leak through the NPC (KI-039), the private-chat analogue
+of the KI-001/KI-034 isolation guarantee.
+**Decision:** Private turns persist ONLY to the already-isolated `privateChats[`${playerId}:${characterId}`]`
+thread (which is what feeds that player's own `conversationHistory` back to the model). The shared
+`characterMemories[characterId]` is written solely by PUBLIC group-chat lines. `appendConversation`
+gained optional speaker/channel/round labeling (fixes KI-015's hardcoded `round:0`), and shared memory
+growth is bounded by `summarizeConversations` compaction past a threshold.
+**Consequences:** An NPC's "memory" is now two-tier: a shared public memory (group chat, clues) plus each
+player's private thread supplied per-request — never cross-pollinated. Voting/pure helpers that tests
+load must remain strip-types-loadable, so shared pure vote/tally helpers live in `projection.ts` (not
+`room-engine.ts`, whose `@/`-value import chain the strip-types test runner can't resolve).
