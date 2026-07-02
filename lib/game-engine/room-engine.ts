@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { initializeMemory } from '@/lib/game-engine/memory-manager';
 import { getNextPhase } from '@/lib/game-engine/phase-manager';
 import { generatePublicId } from '@/lib/room/auth';
+import { connectedHumanVoteState } from '@/lib/scenarios/projection';
 import type { CharacterControl, GamePhase, Player, Room, Scenario } from '@/types/game';
 
 function shuffle<T>(input: T[]): T[] {
@@ -87,7 +88,7 @@ function roundForPhase(phase: GamePhase, currentRound: number): number {
   return currentRound;
 }
 
-export function canAdvanceRoom(room: Room): boolean {
+export function canAdvanceRoom(room: Room, opts?: { force?: boolean }): boolean {
   if (room.status !== 'in_progress') {
     return false;
   }
@@ -95,15 +96,21 @@ export function canAdvanceRoom(room: Room): boolean {
   if (!next) {
     return false;
   }
-  // VOTING → REVEAL requires at least one vote.
-  if (room.currentPhase === 'VOTING' && Object.keys(room.votes).length === 0) {
-    return false;
+  // VOTING → REVEAL requires at least one vote AND — unless the host forces it — that every connected
+  // human has voted (C9 / KI-043). NPC votes (keyed `npc:<id>`) count toward the tally but not the gate.
+  if (room.currentPhase === 'VOTING') {
+    if (Object.keys(room.votes).length === 0) {
+      return false;
+    }
+    if (!opts?.force && !connectedHumanVoteState(room).allHumansVoted) {
+      return false;
+    }
   }
   return true;
 }
 
-export function advanceRoom(room: Room): Room | null {
-  if (!canAdvanceRoom(room)) {
+export function advanceRoom(room: Room, opts?: { force?: boolean }): Room | null {
+  if (!canAdvanceRoom(room, opts)) {
     return null;
   }
   const next = getNextPhase(room.currentPhase);

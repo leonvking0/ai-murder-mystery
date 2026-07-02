@@ -3,6 +3,12 @@
 // secrets/privateRelation, clue.significance, or non-public timeline — except the full reveal,
 // which is only attached when the room is in the REVEAL phase.
 
+import { randomUUID } from 'node:crypto';
+
+// Relative + explicit `.ts` for the strip-types test runner (the `@/` alias only resolves for type-only
+// imports there; see tests/info-isolation.test.ts). Value imports here MUST stay relative so this module
+// remains loadable offline — do NOT value-import room-engine.ts (its @/-value chain would break tests).
+import { INVESTIGATION_BUDGET } from '../game-engine/room-investigation.ts';
 import type {
   Character,
   CharacterPublic,
@@ -126,11 +132,96 @@ export function projectRoomForPlayer(
       yourPrivateChats,
       voteCount: Object.keys(room.votes).length,
       youVotedFor: room.votes[playerId],
+      // C8: per-phase investigation budget + how many searches THIS player has spent this phase.
+      investigationBudget: INVESTIGATION_BUDGET,
+      yourInvestigationsThisPhase: room.investigationCounts?.[`${playerId}:${room.currentPhase}`] ?? 0,
+      // C9: public-safe vote-progress counts (never who voted for whom pre-reveal) + tie-revote counter.
+      ...connectedHumanVoteState(room),
+      voteRevoteCount: room.voteRevoteCount ?? 0,
     },
     you,
     scenario: toScenarioPublic(scenario),
     yourCharacter,
     reveal: isReveal ? buildReveal(room, scenario, playerId) : undefined,
+  };
+}
+
+// ---- Voting helpers (pure; shared by buildReveal, the advance route, and room-engine's VOTING gate) ----
+//
+// These live here — not in room-engine.ts — on purpose: room-engine.ts pulls in an @/-value chain
+// (memory-manager → llm-provider) that the `--experimental-strip-types` test runner cannot resolve, so
+// importing it into this module would break the offline tests that load projection.ts. This module has
+// only relative/type-only value imports and stays test-loadable. The advance route and room-engine
+// import these back through the `@/` alias (resolved fine by the Next bundler).
+
+/**
+ * Tally every vote in the room (including NPC votes, keyed `npc:<characterId>`) over the scenario cast.
+ * `tally` lists ALL characters sorted by descending votes; `leaders` are the characterIds sharing the
+ * top >0 count; `accusedCharacterId` is the sole leader (null on no-votes or a tie); `isTie` is true
+ * when more than one character shares the top count.
+ */
+export function tallyVotes(
+  room: Room,
+  scenario: Scenario,
+): { tally: { characterId: string; votes: number }[]; leaders: string[]; accusedCharacterId: string | null; isTie: boolean } {
+  const tallyMap = new Map<string, number>();
+  for (const accusedId of Object.values(room.votes)) {
+    tallyMap.set(accusedId, (tallyMap.get(accusedId) ?? 0) + 1);
+  }
+  const tally = scenario.characters
+    .map(character => ({ characterId: character.id, votes: tallyMap.get(character.id) ?? 0 }))
+    .sort((a, b) => b.votes - a.votes);
+
+  const topVotes = tally[0]?.votes ?? 0;
+  const leaders = topVotes > 0 ? tally.filter(entry => entry.votes === topVotes).map(entry => entry.characterId) : [];
+  const accusedCharacterId = leaders.length === 1 ? leaders[0] : null;
+  const isTie = leaders.length > 1;
+
+  return { tally, leaders, accusedCharacterId, isTie };
+}
+
+// "Connected humans" = players who hold a character seat and are connected. NPCs are not players.
+function connectedHumans(room: Room): Room['players'] {
+  return room.players.filter(player => Boolean(player.assignedCharacterId) && player.connected);
+}
+
+/**
+ * Public-safe vote-progress read-model: how many connected humans there are, how many have cast a vote
+ * (their playerId key is present in room.votes), and whether all have. Vacuously true with zero humans.
+ * This is exactly the predicate room-engine's VOTING gate consumes, so testing it validates that gate.
+ */
+export function connectedHumanVoteState(
+  room: Room,
+): { connectedHumanCount: number; humansVotedCount: number; allHumansVoted: boolean } {
+  const humans = connectedHumans(room);
+  const humansVotedCount = humans.filter(player => room.votes[player.id] !== undefined).length;
+  return {
+    connectedHumanCount: humans.length,
+    humansVotedCount,
+    allHumansVoted: humansVotedCount === humans.length,
+  };
+}
+
+/**
+ * Pure tie-revote transition (C9 / KI-043): clear all votes, mark that the one allowed revote has been
+ * granted (voteRevoteCount = 1), and append a GM system message prompting a re-vote. Phase is left
+ * unchanged by the caller (it stays VOTING). Returns the next room plus the GM message to broadcast.
+ */
+export function applyTieRevote(room: Room): { room: Room; message: ChatMessage } {
+  const message: ChatMessage = {
+    id: randomUUID(),
+    role: 'system',
+    content: '本轮出现平票，请重新投票并给出证据链。',
+    timestamp: Date.now(),
+  };
+  return {
+    room: {
+      ...room,
+      votes: {},
+      voteRevoteCount: 1,
+      groupChatHistory: [...room.groupChatHistory, message],
+    },
+    message,
   };
 }
 
@@ -144,17 +235,8 @@ function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRo
     return { characterId: character.id, playerName };
   });
 
-  const tallyMap = new Map<string, number>();
-  for (const accusedId of Object.values(room.votes)) {
-    tallyMap.set(accusedId, (tallyMap.get(accusedId) ?? 0) + 1);
-  }
-  const tally = scenario.characters
-    .map(character => ({ characterId: character.id, votes: tallyMap.get(character.id) ?? 0 }))
-    .sort((a, b) => b.votes - a.votes);
-
-  const topVotes = tally[0]?.votes ?? 0;
-  const leaders = tally.filter(entry => entry.votes === topVotes && topVotes > 0);
-  const accusedCharacterId = leaders.length === 1 ? leaders[0].characterId : null;
+  // Reuse the shared tally so the reveal, the advance-route tie check, and the projection all agree.
+  const { tally, accusedCharacterId } = tallyVotes(room, scenario);
 
   const groupCorrect = accusedCharacterId !== null && accusedCharacterId === killer?.id;
 

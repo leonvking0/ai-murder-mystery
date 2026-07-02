@@ -12,8 +12,8 @@ import path from 'node:path';
 process.env.ROOM_AUTH_SECRET ??= 'test-secret-for-seat-auth';
 process.env.DATABASE_PATH ??= path.join('/tmp', `mm-reveal-test-${process.pid}.db`);
 
-const { projectRoomForPlayer } = await import('../lib/scenarios/projection.ts');
-const { presentClue } = await import('../lib/game-engine/room-investigation.ts');
+const { projectRoomForPlayer, tallyVotes, connectedHumanVoteState, applyTieRevote } = await import('../lib/scenarios/projection.ts');
+const { presentClue, investigateRoom, INVESTIGATION_BUDGET } = await import('../lib/game-engine/room-investigation.ts');
 
 let pass = 0;
 let fail = 0;
@@ -205,6 +205,138 @@ console.log('B5 presentClue publishes the clue to the whole table:');
   check('presented clue is visible in projected publicClues', projected.room.publicClues.some(c => c.id === 'cA'));
   check('projection of the presented clue carries NO significance', !blob.includes('SECRET-SIGNIFICANCE'));
   check('no reveal payload pre-REVEAL', projected.reveal === undefined);
+}
+
+// ---- C9: voting integrity — the connected-human gate (Batch C / KI-043) ----
+// canAdvanceRoom itself can't be loaded under `--experimental-strip-types` (room-engine.ts pulls in an
+// @/-value chain memory-manager → llm-provider). Its VOTING gate delegates to connectedHumanVoteState,
+// so exercising that predicate validates the gate: "false when a connected human hasn't voted, true
+// when all voted." (The host `force` override is a one-line bypass of exactly this predicate.)
+
+console.log('C9 connected-human vote gate (the predicate canAdvanceRoom composes):');
+{
+  const noneVoted = baseRoom({ currentPhase: 'VOTING', votes: {} });
+  const s0 = connectedHumanVoteState(noneVoted);
+  check('gate: 2 connected humans detected', s0.connectedHumanCount === 2);
+  check('gate: nobody voted yet → not all voted', s0.humansVotedCount === 0 && s0.allHumansVoted === false);
+
+  const oneVoted = baseRoom({ currentPhase: 'VOTING', votes: { 'P-KILLER': 'd', 'npc:z': 'k' } });
+  const s1 = connectedHumanVoteState(oneVoted);
+  check('gate: false when a connected human still hasn\'t voted', s1.allHumansVoted === false);
+  check('gate: an npc vote does NOT count as a human vote', s1.humansVotedCount === 1);
+
+  const allVoted = baseRoom({ currentPhase: 'VOTING', votes: { 'P-KILLER': 'd', 'P-DET': 'k' } });
+  const s2 = connectedHumanVoteState(allVoted);
+  check('gate: true when every connected human has voted', s2.allHumansVoted === true && s2.humansVotedCount === 2);
+
+  const withDisconnected = baseRoom({
+    currentPhase: 'VOTING',
+    votes: { 'P-KILLER': 'd' },
+    players: [
+      { id: 'P-KILLER', publicId: 'pk', name: '真凶玩家', isHost: true, connected: true, joinedAt: 1, assignedCharacterId: 'k' },
+      { id: 'P-DET', publicId: 'pd', name: '侦探玩家', isHost: false, connected: false, joinedAt: 2, assignedCharacterId: 'd' },
+    ],
+  });
+  const s3 = connectedHumanVoteState(withDisconnected);
+  check('gate: disconnected humans are excluded from the gate', s3.connectedHumanCount === 1 && s3.allHumansVoted === true);
+}
+
+// ---- C9: tie detection + the one-revote transition ----
+
+console.log('C9 tie detection + single-revote transition:');
+{
+  const tie = baseRoom({ currentPhase: 'VOTING', votes: { 'P-KILLER': 'k', 'P-DET': 'd' } });
+  const t = tallyVotes(tie, scenario);
+  check('tie: isTie true when the top count is shared', t.isTie === true);
+  check('tie: no sole accused on a tie', t.accusedCharacterId === null);
+  check('tie: both characters are leaders', t.leaders.length === 2);
+
+  const clear = baseRoom({ currentPhase: 'VOTING', votes: { 'P-KILLER': 'k', 'P-DET': 'k', 'npc:z': 'd' } });
+  const c = tallyVotes(clear, scenario);
+  check('no tie: sole leader wins (npc votes counted in the tally)', c.isTie === false && c.accusedCharacterId === 'k');
+
+  const { room: revoted, message } = applyTieRevote(tie);
+  check('revote: votes cleared', Object.keys(revoted.votes).length === 0);
+  check('revote: voteRevoteCount set to 1', revoted.voteRevoteCount === 1);
+  check('revote: phase stays VOTING (no advance to REVEAL)', revoted.currentPhase === 'VOTING');
+  check('revote: GM prompt appended to group chat', revoted.groupChatHistory.some((m) => m.id === message.id));
+  check(
+    'revote: GM prompt is a system message with the expected copy',
+    message.role === 'system' && message.content === '本轮出现平票，请重新投票并给出证据链。',
+  );
+  // Only ONE revote is granted: once voteRevoteCount >= 1, a persistent tie must fall through to REVEAL.
+  const secondTie = { ...revoted, votes: { 'P-KILLER': 'k', 'P-DET': 'd' } };
+  check('revote: a second tie is NOT eligible for another revote', (secondTie.voteRevoteCount ?? 0) >= 1);
+}
+
+// ---- C8: per-phase investigation budget (KI-042) ----
+
+console.log('C8 per-phase investigation budget:');
+{
+  check('INVESTIGATION_BUDGET is 2', INVESTIGATION_BUDGET === 2);
+
+  const room = baseRoom({ currentPhase: 'INVESTIGATION_1', characterMemories: {} });
+  const first = investigateRoom(room, scenario, 'P-DET', 'study');
+  check('1st search records a budget unit', first.room.investigationCounts?.['P-DET:INVESTIGATION_1'] === 1);
+
+  const second = investigateRoom(first.room, scenario, 'P-DET', 'study');
+  check('2nd search records the second unit', second.room.investigationCounts?.['P-DET:INVESTIGATION_1'] === 2);
+
+  let threw = false;
+  try {
+    investigateRoom(second.room, scenario, 'P-DET', 'study');
+  } catch (e) {
+    threw = e instanceof Error && e.message === '本阶段搜证次数已用完';
+  }
+  check('3rd search throws once the budget is exhausted', threw === true);
+
+  // Budget is per-(player, phase): a different player is unaffected...
+  const other = investigateRoom(second.room, scenario, 'P-KILLER', 'study');
+  check('another player has an independent budget', other.room.investigationCounts?.['P-KILLER:INVESTIGATION_1'] === 1);
+
+  // ...and the count resets in the next investigation phase.
+  const nextPhase = investigateRoom({ ...second.room, currentPhase: 'INVESTIGATION_2' }, scenario, 'P-DET', 'study');
+  check('budget resets in INVESTIGATION_2', nextPhase.room.investigationCounts?.['P-DET:INVESTIGATION_2'] === 1);
+  check('INVESTIGATION_1 count untouched by the INVESTIGATION_2 search', nextPhase.room.investigationCounts?.['P-DET:INVESTIGATION_1'] === 2);
+}
+
+// ---- C8 + C9: projection exposes the new public-safe fields and still leaks nothing secret ----
+
+console.log('C8+C9 projection exposes new fields (public-safe, no secret leak):');
+{
+  const room = baseRoom({
+    currentPhase: 'VOTING',
+    votes: { 'P-KILLER': 'd' }, // only the killer-player has voted so far
+    voteRevoteCount: 1,
+    investigationCounts: { 'P-DET:INVESTIGATION_1': 2, 'P-KILLER:INVESTIGATION_1': 1 },
+  });
+  const view = projectRoomForPlayer(room, scenario, 'P-DET')!;
+  check('projects investigationBudget = 2', view.room.investigationBudget === 2);
+  check('yourInvestigationsThisPhase defaults to 0 (no VOTING-phase searches)', view.room.yourInvestigationsThisPhase === 0);
+  check('connectedHumanCount = 2', view.room.connectedHumanCount === 2);
+  check('humansVotedCount = 1 (only the killer-player voted)', view.room.humansVotedCount === 1);
+  check('allHumansVoted = false', view.room.allHumansVoted === false);
+  check('voteRevoteCount projected = 1', view.room.voteRevoteCount === 1);
+
+  // yourInvestigationsThisPhase tracks the CURRENT phase for the requester.
+  const invView = projectRoomForPlayer({ ...room, currentPhase: 'INVESTIGATION_1' }, scenario, 'P-DET')!;
+  check('yourInvestigationsThisPhase reflects INVESTIGATION_1 count (=2)', invView.room.yourInvestigationsThisPhase === 2);
+
+  // Isolation: the new fields (and the raw votes / investigationCounts maps) never leak solution secrets,
+  // another player's vote choice, or player-id-keyed internals pre-reveal.
+  const blob = JSON.stringify(view);
+  check(
+    'no case truth/method/motive leaked',
+    !blob.includes('SECRET-TRUTH') && !blob.includes('SECRET-METHOD') && !blob.includes('SECRET-MOTIVE'),
+  );
+  check(
+    'no other character\'s private script/secret/alibi leaked',
+    !blob.includes('SCRIPT-k') && !blob.includes('SECRET-k') && !blob.includes('ALIBI-k'),
+  );
+  check('no clue significance leaked', !blob.includes('SECRET-SIGNIFICANCE'));
+  check('raw votes map is not projected (no pre-reveal who-voted-for-whom)', (view.room as Record<string, unknown>).votes === undefined && view.room.voteCount === 1);
+  check('investigationCounts map (player-id-keyed) is not projected', !blob.includes(':INVESTIGATION_1'));
+  check('no reveal payload pre-REVEAL', view.reveal === undefined);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -4,11 +4,19 @@ import { runNpcVoting } from '@/lib/agents/npc-voter';
 import { PHASE_NARRATIONS } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
-import { projectRoomForPlayer } from '@/lib/scenarios/projection';
+import { applyTieRevote, projectRoomForPlayer, tallyVotes } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { advanceRoom, canAdvanceRoom } from '@/lib/game-engine/room-engine';
 import { publish } from '@/lib/realtime/room-bus';
-import type { ChatMessage } from '@/types/game';
+import type { ChatMessage, GamePhase } from '@/types/game';
+
+interface AdvanceBody {
+  // C2 / KI-049: if provided, the mutator refuses to advance unless the room is still on this phase —
+  // a double-click or stale retry becomes a 409 no-op instead of skipping a phase.
+  expectedPhase?: GamePhase;
+  // C9 / KI-043: host-only override of the "all connected humans have voted" gate.
+  force?: boolean;
+}
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -17,6 +25,15 @@ interface RouteContext {
 export async function POST(req: Request, context: RouteContext): Promise<Response> {
   try {
     const { id } = await context.params;
+
+    let body: AdvanceBody;
+    try {
+      body = (await req.json()) as AdvanceBody;
+    } catch {
+      body = {};
+    }
+    const expectedPhase = body.expectedPhase;
+    const force = body.force === true;
 
     const playerId = getAuthedPlayerId(req, id);
     if (!playerId) {
@@ -37,22 +54,53 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: '只有房主可以推进阶段' }, { status: 403 });
     }
 
-    if (!canAdvanceRoom(room)) {
-      return Response.json(
-        { error: `当前阶段无法推进：${room.currentPhase}` },
-        { status: 400 },
-      );
-    }
-
-    // Append the GM narration for the new phase INSIDE the mutator so it persists atomically with the
-    // phase change. Captured via closure to broadcast the exact same message (id) to live clients.
+    // Everything below runs INSIDE the atomic mutator so the stale-phase guard, the vote gate, and the
+    // tie-revote decision all see one consistent snapshot and persist together. Distinct failure reasons
+    // are surfaced through the `failure` closure; the GM narration / revote message via their closures.
+    let failure: { status: number; body: Record<string, unknown> } | null = null;
     let narration: ChatMessage | null = null;
+    let revoteMessage: ChatMessage | null = null;
+    let didRevote = false;
+
     const updated = updateRoom(id, current => {
       if (current.hostPlayerId !== playerId) {
+        failure = { status: 403, body: { error: '只有房主可以推进阶段' } };
         return null;
       }
-      const advanced = advanceRoom(current);
+
+      // C2: idempotent stale-phase guard. A retry that raced another advance is a no-op, not a skip.
+      if (expectedPhase && current.currentPhase !== expectedPhase) {
+        failure = { status: 409, body: { error: '阶段已推进，请刷新', code: 'stale_phase' } };
+        return null;
+      }
+
+      // C9: vote gate. In VOTING, distinguish "not everyone voted yet" (host can force) from a generic
+      // "can't advance" so the UI can offer the force button.
+      if (!canAdvanceRoom(current, { force })) {
+        if (current.currentPhase === 'VOTING' && Object.keys(current.votes).length > 0 && !force) {
+          failure = { status: 400, body: { error: '还有玩家未投票（房主可强制推进）', code: 'awaiting_votes' } };
+        } else {
+          failure = { status: 400, body: { error: `当前阶段无法推进：${current.currentPhase}` } };
+        }
+        return null;
+      }
+
+      // C9: tie → exactly one revote. When leaving VOTING with a tie and no revote spent yet, clear the
+      // votes, mark the revote, post a GM prompt, and STAY in VOTING (do not advance to REVEAL).
+      if (current.currentPhase === 'VOTING') {
+        const { isTie } = tallyVotes(current, scenario);
+        if (isTie && (current.voteRevoteCount ?? 0) < 1) {
+          const revote = applyTieRevote(current);
+          revoteMessage = revote.message;
+          didRevote = true;
+          return revote.room;
+        }
+      }
+
+      // Normal advance: append the new phase's GM narration atomically with the phase change.
+      const advanced = advanceRoom(current, { force });
       if (!advanced) {
+        failure = { status: 400, body: { error: `当前阶段无法推进：${current.currentPhase}` } };
         return null;
       }
       const message: ChatMessage = {
@@ -65,7 +113,26 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return { ...advanced, groupChatHistory: [...advanced.groupChatHistory, message] };
     });
 
-    if (!updated || !narration) {
+    if (failure) {
+      const { status, body: errorBody } = failure;
+      return Response.json(errorBody, { status });
+    }
+    if (!updated) {
+      return Response.json({ error: 'Room not found' }, { status: 404 });
+    }
+
+    // Tie-revote path: phase is unchanged (still VOTING). Broadcast the GM prompt + a state signal, then
+    // re-run NPC voting so NPCs re-cast (their old votes were cleared) — same fire-and-forget pattern.
+    if (didRevote && revoteMessage) {
+      const gmMessage = revoteMessage;
+      publish(id, { type: 'group_message', message: gmMessage });
+      publish(id, { type: 'room_state' });
+      void runNpcVoting(id, scenario).catch(error => console.error('NPC voting failed:', error));
+      return Response.json(projectRoomForPlayer(updated, scenario, playerId));
+    }
+
+    if (!narration) {
+      // Should be unreachable: a non-failing, non-revote mutation always set narration.
       return Response.json({ error: '推进失败' }, { status: 409 });
     }
     // Capture into a const: `narration` is closure-assigned, so its narrowing would widen back across
