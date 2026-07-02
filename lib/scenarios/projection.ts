@@ -15,6 +15,7 @@ import type {
   ChatMessage,
   Clue,
   ClueView,
+  Player,
   PlayerRoomView,
   PublicPlayer,
   Room,
@@ -77,13 +78,23 @@ export function toScenarioPublic(scenario: Scenario): ScenarioPublic {
 
 // Never expose another player's real `id` (KI-034): it is the seat auth credential. Only the
 // non-secret `publicId` (render key) plus a server-set `isSelf` marker for the requesting player.
-function toPublicPlayer(player: Room['players'][number], requestingPlayerId: string): PublicPlayer {
+// `controlledByNpc` reflects whether this player's assigned seat is currently AI-driven (a
+// disconnected human's seat that got taken over shows as NPC-controlled) — public-safe.
+function toPublicPlayer(
+  player: Room['players'][number],
+  requestingPlayerId: string,
+  characterControl: Room['characterControl'],
+): PublicPlayer {
+  const controlledByNpc = player.assignedCharacterId
+    ? characterControl[player.assignedCharacterId]?.kind === 'npc'
+    : false;
   return {
     publicId: player.publicId,
     name: player.name,
     isHost: player.isHost,
     connected: player.connected,
     assignedCharacterId: player.assignedCharacterId,
+    controlledByNpc,
     isSelf: player.id === requestingPlayerId,
   };
 }
@@ -106,6 +117,13 @@ export function projectRoomForPlayer(
     ? scenario.characters.find(character => character.id === you.assignedCharacterId) ?? null
     : null;
 
+  // `you` is the requester's own full Player. Its `id` (their own auth credential) is theirs to hold,
+  // but the D2 presence bookkeeping (`disconnectedAt` / `lastSeenAt`) is SERVER-ONLY — strip it so it
+  // never reaches any client, not even the player it describes (see KNOWN-ISSUES info-isolation rule).
+  const youSafe: Player = { ...you };
+  delete youSafe.disconnectedAt;
+  delete youSafe.lastSeenAt;
+
   const isReveal = room.currentPhase === 'REVEAL';
 
   // Only the requesting player's own private threads.
@@ -124,8 +142,9 @@ export function projectRoomForPlayer(
       status: room.status,
       currentPhase: room.currentPhase,
       round: room.round,
-      hostPlayerId: room.hostPlayerId,
-      players: room.players.map(player => toPublicPlayer(player, playerId)),
+      // Publish the host's non-secret render id, never their real `hostPlayerId` (KI-034 leak fix).
+      hostPublicId: room.players.find(player => player.id === room.hostPlayerId)?.publicId ?? '',
+      players: room.players.map(player => toPublicPlayer(player, playerId, room.characterControl)),
       publicClues: room.publicClues.map(toClueView),
       yourClues: (room.discoveredClues[playerId] ?? []).map(toClueView),
       groupChatHistory: room.groupChatHistory,
@@ -139,7 +158,7 @@ export function projectRoomForPlayer(
       ...connectedHumanVoteState(room),
       voteRevoteCount: room.voteRevoteCount ?? 0,
     },
-    you,
+    you: youSafe,
     scenario: toScenarioPublic(scenario),
     yourCharacter,
     reveal: isReveal ? buildReveal(room, scenario, playerId) : undefined,
@@ -225,13 +244,88 @@ export function applyTieRevote(room: Room): { room: Room; message: ChatMessage }
   };
 }
 
+// ---- D2 disconnect takeover + host handoff (pure; consumed by room-engine) ----
+//
+// These live here (not room-engine.ts) for the same reason as the voting helpers above: this module is
+// loadable under `--experimental-strip-types` (relative/type-only value imports only), room-engine.ts
+// is not. room-engine.ts imports these back through `@/` and composes them with the LLM-touching bits.
+
+/**
+ * Characters whose HUMAN controller has been disconnected at least `idleMs` and should be handed to an
+ * NPC. A seat qualifies iff: it is a `human`-controlled seat, its controlling player actually holds it
+ * (assigned), that player is disconnected (`connected === false` or a `disconnectedAt` is recorded),
+ * we have a `disconnectedAt` timestamp to measure from, and `now - disconnectedAt >= idleMs`. Connected
+ * humans, within-idle disconnects, NPC seats, and unassigned/lobby seats are all excluded.
+ */
+export function seatsToTakeOver(room: Room, now: number, idleMs: number): string[] {
+  const playerById = new Map(room.players.map(player => [player.id, player]));
+  const result: string[] = [];
+  for (const [characterId, control] of Object.entries(room.characterControl)) {
+    if (control.kind !== 'human') {
+      continue; // NPC seat — nothing to take over.
+    }
+    const player = playerById.get(control.playerId);
+    if (!player || player.assignedCharacterId !== characterId) {
+      continue; // Controller missing or not actually seated here (unassigned) — skip.
+    }
+    const disconnected = player.connected === false || player.disconnectedAt !== undefined;
+    if (!disconnected) {
+      continue; // Still connected — keep the human in control.
+    }
+    if (player.disconnectedAt === undefined) {
+      continue; // No timestamp to measure idle from — be conservative and wait.
+    }
+    if (now - player.disconnectedAt < idleMs) {
+      continue; // Within the idle grace window — not yet.
+    }
+    result.push(characterId);
+  }
+  return result;
+}
+
+/**
+ * If the current host is disconnected or absent, return a room whose host (`hostPlayerId` + the players'
+ * `isHost` flags) is moved to the EARLIEST-JOINED CONNECTED human — i.e. the first still-connected
+ * player in join order (the `players` array is join-ordered). Returns null when the host is fine or when
+ * no connected human exists (host left unchanged). Pure; callers gate on the idle threshold separately.
+ */
+export function reassignHost(room: Room): Room | null {
+  const currentHost = room.players.find(player => player.id === room.hostPlayerId);
+  const hostPresent =
+    currentHost !== undefined && currentHost.connected !== false && currentHost.disconnectedAt === undefined;
+  if (hostPresent) {
+    return null; // Host is connected — no handoff needed.
+  }
+
+  const successor = room.players.find(
+    player => player.connected !== false && player.disconnectedAt === undefined,
+  );
+  if (!successor) {
+    return null; // Nobody connected to hand off to — leave the host unchanged.
+  }
+
+  return {
+    ...room,
+    hostPlayerId: successor.id,
+    players: room.players.map(player => ({ ...player, isHost: player.id === successor.id })),
+  };
+}
+
 function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRoomView['reveal'] {
   const killer = scenario.characters.find(character => character.isKiller);
 
   const playerNameById = new Map(room.players.map(player => [player.id, player.name]));
   const cast = scenario.characters.map(character => {
     const control = room.characterControl[character.id];
-    const playerName = control?.kind === 'human' ? playerNameById.get(control.playerId) ?? null : null;
+    // Attribute the seat to its human: the current human controller, or — if a disconnected human's
+    // seat was taken over by an NPC (D2) — the ORIGINAL human via `takenOverFromPlayerId`. A seat that
+    // was always an NPC has no human name (null).
+    let playerName: string | null = null;
+    if (control?.kind === 'human') {
+      playerName = playerNameById.get(control.playerId) ?? null;
+    } else if (control?.kind === 'npc' && control.takenOverFromPlayerId) {
+      playerName = playerNameById.get(control.takenOverFromPlayerId) ?? null;
+    }
     return { characterId: character.id, playerName };
   });
 

@@ -1,6 +1,6 @@
 import { getAuthedPlayerId } from '@/lib/room/auth';
-import { getRoom } from '@/lib/store/rooms';
-import { subscribe } from '@/lib/realtime/room-bus';
+import { getRoom, updateRoom } from '@/lib/store/rooms';
+import { markConnected, markDisconnected, publish, subscribe } from '@/lib/realtime/room-bus';
 import { encodeSSE, encodeSSEComment, sseHeaders } from '@/lib/realtime/sse';
 
 export const dynamic = 'force-dynamic';
@@ -48,6 +48,39 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
 
       const heartbeat = setInterval(() => safeEnqueue(encodeSSEComment('ping')), 25000);
 
+      // D2 presence: refcount this player's live streams. Only the 0→1 transition flips them online, so
+      // a second tab / reconnect overlap never falsely toggles presence. If this returning human's seat
+      // had been taken over by an NPC, RECLAIM it here.
+      const { firstConnection } = markConnected(id, playerId);
+      if (firstConnection) {
+        const now = Date.now();
+        let reclaimedCharacterId: string | null = null;
+        const updated = updateRoom(id, current => {
+          const players = current.players.map(player =>
+            player.id === playerId
+              ? { ...player, connected: true, disconnectedAt: undefined, lastSeenAt: now }
+              : player,
+          );
+          const characterControl = { ...current.characterControl };
+          for (const [characterId, control] of Object.entries(characterControl)) {
+            if (control.kind === 'npc' && control.takenOverFromPlayerId === playerId) {
+              characterControl[characterId] = { kind: 'human', playerId };
+              reclaimedCharacterId = characterId;
+            }
+          }
+          return { ...current, players, characterControl };
+        });
+        const self = updated?.players.find(player => player.id === playerId);
+        if (self) {
+          publish(id, { type: 'presence', publicId: self.publicId, connected: true });
+          // Only publicId leaves the server — never the real playerId.
+          if (reclaimedCharacterId) {
+            publish(id, { type: 'seat_takeover', characterId: reclaimedCharacterId, publicId: self.publicId });
+            publish(id, { type: 'room_state' });
+          }
+        }
+      }
+
       const cleanup = () => {
         if (closed) {
           return;
@@ -55,6 +88,25 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
         closed = true;
         clearInterval(heartbeat);
         unsubscribe();
+
+        // D2 presence: only the LAST stream closing marks the player offline (multi-tab safe).
+        const { lastConnection } = markDisconnected(id, playerId);
+        if (lastConnection) {
+          const now = Date.now();
+          const updated = updateRoom(id, current => ({
+            ...current,
+            players: current.players.map(player =>
+              player.id === playerId
+                ? { ...player, connected: false, disconnectedAt: now, lastSeenAt: now }
+                : player,
+            ),
+          }));
+          const self = updated?.players.find(player => player.id === playerId);
+          if (self) {
+            publish(id, { type: 'presence', publicId: self.publicId, connected: false });
+          }
+        }
+
         try {
           controller.close();
         } catch {

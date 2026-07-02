@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { manageRoomGroupResponse } from '@/lib/agents/room-group-chat';
 import { appendConversation, compactConversationsIfNeeded } from '@/lib/game-engine/memory-manager';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
+import { applyDisconnectTakeovers, reassignHostIfNeeded, SEAT_TAKEOVER_IDLE_MS } from '@/lib/game-engine/room-engine';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
@@ -97,9 +98,50 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
     const humanSpeakerName =
       (player.assignedCharacterId && characterNameById.get(player.assignedCharacterId)) || player.name;
     await runExclusive(id, async () => {
+      // D2 opportunistic sweep (before the NPC turn, under the per-room lock so it can't race another
+      // turn): hand any long-disconnected human seat to an NPC, and hand off the host if they've gone
+      // idle. Re-read the swept room and drive the turn off it so takeover NPCs answer this turn.
+      const before = getRoom(id);
+      if (!before) {
+        return;
+      }
+      const now = Date.now();
+      updateRoom(id, current =>
+        reassignHostIfNeeded(
+          applyDisconnectTakeovers(current, scenario, now, SEAT_TAKEOVER_IDLE_MS),
+          now,
+          SEAT_TAKEOVER_IDLE_MS,
+        ),
+      );
+
       const fresh = getRoom(id);
       if (!fresh) {
         return;
+      }
+
+      // Broadcast any control changes so every client refetches the (now NPC-driven / re-hosted) roster.
+      // Payloads carry only publicId / hostPublicId — never a real playerId.
+      let sweptSomething = false;
+      for (const character of scenario.characters) {
+        const beforeControl = before.characterControl[character.id];
+        const afterControl = fresh.characterControl[character.id];
+        if (beforeControl?.kind === 'human' && afterControl?.kind === 'npc') {
+          const departed = before.players.find(item => item.id === beforeControl.playerId);
+          if (departed) {
+            publish(id, { type: 'seat_takeover', characterId: character.id, publicId: departed.publicId });
+          }
+          sweptSomething = true;
+        }
+      }
+      if (before.hostPlayerId !== fresh.hostPlayerId) {
+        const newHost = fresh.players.find(item => item.id === fresh.hostPlayerId);
+        if (newHost) {
+          publish(id, { type: 'host_change', hostPublicId: newHost.publicId });
+        }
+        sweptSomething = true;
+      }
+      if (sweptSomething) {
+        publish(id, { type: 'room_state' });
       }
 
       for await (const event of manageRoomGroupResponse(fresh, scenario, message)) {

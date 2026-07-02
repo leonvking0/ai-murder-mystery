@@ -204,7 +204,10 @@ export type RoomStatus = 'lobby' | 'in_progress' | 'finished';
 
 export type CharacterControl =
   | { kind: 'human'; playerId: string }
-  | { kind: 'npc' };
+  // When a disconnected human's seat is taken over by an NPC (D2), we remember whose seat it was so
+  // the reveal can still attribute the character to the original human. `takenOverFromPlayerId` is a
+  // real (secret) playerId — it is SERVER-ONLY and is only ever mapped to a name inside buildReveal.
+  | { kind: 'npc'; takenOverFromPlayerId?: string };
 
 export interface Player {
   // Secret auth credential (server-only): whoever presents a token bound to this id acts as this
@@ -217,6 +220,11 @@ export interface Player {
   assignedCharacterId?: string;
   connected: boolean;
   joinedAt: number;
+  // D2 presence (SERVER-ONLY — never projected to any client): when the player's LAST SSE stream
+  // closed (undefined = currently connected), and when they were last seen. Used to drive idle-based
+  // seat takeover + host handoff. Projection strips these; clients only see `connected` + `publicId`.
+  disconnectedAt?: number;
+  lastSeenAt?: number;
 }
 
 export interface Room {
@@ -313,6 +321,9 @@ export interface PublicPlayer {
   isHost: boolean;
   connected: boolean;
   assignedCharacterId?: string; // character *identity* is public once assigned; secrets are not
+  // True when this seat is currently NPC-controlled (either never assigned to a human, or a
+  // disconnected human's seat that was taken over). Public-safe: reveals only that the AI drives it.
+  controlledByNpc: boolean;
   isSelf: boolean; // server-set: true only for the requesting (cookie-authenticated) player
 }
 
@@ -340,7 +351,9 @@ export interface PlayerRoomView {
     status: RoomStatus;
     currentPhase: GamePhase;
     round: number;
-    hostPlayerId: string;
+    // Non-secret render id of the host (KI-034): shipping the host's real `hostPlayerId` here leaked a
+    // seat auth credential to every member. Clients identify the host via `you.isHost` / `player.isHost`.
+    hostPublicId: string;
     players: PublicPlayer[];
     publicClues: ClueView[];
     yourClues: ClueView[];
