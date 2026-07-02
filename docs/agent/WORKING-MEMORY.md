@@ -2,6 +2,46 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-02 — Backlog Batch E (robustness lows & housekeeping) IMPLEMENTED & MERGED
+
+**State:** Green on `main` @ `f82fa1e`. `npm test` = **268 checks** (info-isolation 112 + gameplay-chat 51 +
+gameplay-reveal 98 + **new** scenario-validation 7), tsc clean, eslint clean, authoritative Turbopack
+`npm run build` ✓ Compiled successfully on the integrated main.
+
+**What landed (5 PRs #21–#25, multi-agent orchestration — 4 opus-4.8 workers in git worktrees, all file-disjoint
+so a single parallel wave, orchestrator audited every diff + squash-merged; E7 + docs folded into the wrap-up PR):**
+- **PR #21 (EA · E1+E2)** — KI-052 SSE `ReadableStream.cancel()` now runs the same idempotent cleanup as
+  `req.signal` abort (a consumer cancel that never fires abort no longer leaks the emitter listener + 25s
+  heartbeat or leaves the player online); KI-053 db handle on `globalThis.__roomsDb` (mirrors room-bus) so dev
+  HMR stops leaking better-sqlite3 connections; KI-054 throttled finished-room TTL sweep (`ROOM_TTL_MS`, 24h
+  default, `pruneFinishedRooms`, ≤ once/hour in `createRoom`; never touches lobby/in_progress); KI-055 per-IP
+  sliding-window limit (30/60s) → 429 on the public `resolve/[code]` so the code space can't be enumerated.
+- **PR #22 (EB · E3)** — KI-056/028 stronger `validateScenario`: **exactly one killer** (0 or >1 both throw),
+  `availableInRound` positive integer, relationship `characterId` referential integrity. New
+  `tests/scenario-validation.test.ts` (6 checks over the real `storm-mansion.json`) wired into `npm test`.
+- **PR #23 (EC · E4+E5)** — KI-060 `CHAT_MAX_OUTPUT_TOKENS=500` replaces the 5000 ceiling in both NPC stream
+  calls; KI-059 `getLLMProvider()` auto-selects the provider whose key is present when `LLM_PROVIDER` is unset
+  (fixes "only ANTHROPIC_API_KEY set → default google → all NPCs mute"), explicit `LLM_PROVIDER` still honored;
+  `streamChat` emits a one-time `console.warn` on degraded/mismatched key config. **KI-058 was already resolved
+  in Batch C** (group-chat compaction + private-chat 16-msg truncation), so E4 = the token cap only.
+- **PR #24 (ED · E6)** — KI-062 both chat panels only auto-scroll when already near the bottom (80px), tracked
+  via a native passive listener on the real Radix `ScrollArea` viewport (`data-slot="scroll-area-viewport"`,
+  an ancestor — React `onScroll` doesn't bubble). Refs (not state) → no re-render churn; graceful-degrade.
+- **PR #25 (docs · E7 + wrap-up)** — KI-033 AGENTS.md stale stack corrected to the as-built (Vercel AI SDK,
+  SQLite better-sqlite3, multiplayer rooms, no GM agent) + defer-to-ARCHITECTURE banner; BACKLOG/KNOWN-ISSUES/
+  DECISIONS/WORKING-MEMORY updated.
+
+**Isolation audited every merge:** EA adds no new output/SSE fields (only publicId/characterId ever leave the
+server); EC's provider changes are server-internal (no client surface); no-key → `isLLMConfigured()` still false
+so the offline test fallback holds; ED is pure client scroll behavior. tsc/eslint/test/build all green.
+
+**Deferred (unchanged, Batch F candidates):** D5 "argue-then-lock" ballot sub-state; D6 per-location
+`lockedCount` UX; nudge-throttle client feedback. Housekeeping-adjacent: stale merged remote branches
+(`origin/feat/*`, `origin/fix/*`, `origin/docs/*`) could be pruned — left for an explicit go-ahead (outward action).
+
+**Next up:** Batch F (content & reach) — storm-mansion content bugs (F1), scenario supply pipeline + home picker
+(F2), objectives scoring (F3), flow data-ization (F4), human↔human private chat (F5). See BACKLOG.md.
+
 ## Snapshot — 2026-07-02 — Backlog Batch D (gameplay depth) IMPLEMENTED & MERGED
 
 **State:** Green on `main` @ `008f551`. `npm test` = **261 checks** (info-isolation 112 + gameplay-chat 51 +

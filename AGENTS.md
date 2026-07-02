@@ -1,10 +1,20 @@
 # AGENTS.md - AI Murder Mystery Game
 
-> ⚠️ **This file is the original spec/vision, not the as-built system.** Parts are stale (e.g. the LLM
-> stack is the **Vercel AI SDK**, not `@anthropic-ai/sdk`; persistence is an **in-memory Map**, not
-> SQLite). For what's actually built, start at **`/CLAUDE.md`** and **`docs/agent/`**
-> (ARCHITECTURE / DECISIONS / PITFALLS / KNOWN-ISSUES / WORKING-MEMORY). On any conflict,
-> `docs/agent/ARCHITECTURE.md` wins.
+> ⚠️ **This file is the original single-player spec/vision, NOT the as-built system.** The game was
+> rebuilt (2026-06-30) into **multiplayer play-as-character rooms**, and several details below are stale.
+> **As-built truth lives in `docs/agent/ARCHITECTURE.md` — it wins on any conflict.** Corrections at a glance:
+> - LLM calls go through the **Vercel AI SDK (`ai`)** against Google Gemini (default) or Anthropic —
+>   **not** the raw `@anthropic-ai/sdk`.
+> - Persistence is **SQLite via better-sqlite3** with atomic `updateRoom` (`lib/store/rooms.ts`) —
+>   there is no in-memory Map and no Drizzle.
+> - The game is **multiplayer**: a host opens a room, friends join by code, each human plays one of the
+>   cast, uncontrolled characters become NPCs (the killer may be human or NPC). It is **not** 1-human-vs-NPCs.
+> - There is **no live GM agent**. "GM" is static, data-driven narration + engine rules
+>   (`phase-manager.ts`, `PHASE_NARRATIONS`); no LLM agent has the full truth.
+> - API is `app/api/room/*` (not `app/api/game/*`); realtime is an in-process EventEmitter + SSE.
+>
+> Start at **`/CLAUDE.md`** and **`docs/agent/`** (ARCHITECTURE / DECISIONS / PITFALLS / KNOWN-ISSUES /
+> WORKING-MEMORY / BACKLOG). The information-isolation rule in §1 below is still exactly right and load-bearing.
 
 > This file is for AI coding agents. Read this before writing any code.
 
@@ -12,14 +22,16 @@
 
 A web-based murder mystery game (剧本杀) where 1 human player interacts with multiple AI-controlled NPCs. Each NPC has private knowledge and objectives. A GM agent controls game flow.
 
-## Tech Stack (DO NOT deviate)
+## Tech Stack (DO NOT deviate — as-built; corrected 2026-07-02, KI-033)
 
-- **Next.js 14+** with App Router, TypeScript
+- **Next.js (App Router), TypeScript** (the repo is on Next 16 + Turbopack)
 - **Tailwind CSS + shadcn/ui** for UI
-- **Claude API** (Anthropic SDK `@anthropic-ai/sdk`) for all LLM calls
+- **Vercel AI SDK (`ai`)** for all LLM calls, against **Google Gemini** (default `gemini-2.5-flash`) or
+  **Anthropic Claude** — provider auto-selected from whichever API key is present (see DECISIONS.md).
+  Do **not** reintroduce the raw `@anthropic-ai/sdk`.
 - **Zustand** for client state
-- **SQLite via better-sqlite3** (or Drizzle ORM) for persistence
-- **SSE (Server-Sent Events)** for streaming responses
+- **SQLite via better-sqlite3** for persistence (atomic `updateRoom` in `lib/store/rooms.ts`); no Drizzle
+- **SSE (Server-Sent Events)** over an in-process EventEmitter room-bus for realtime; EventSource on the client
 
 ## Critical Architecture Rules
 

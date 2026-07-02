@@ -11,15 +11,16 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-02:** ✅ **Batches A (security), B (min gameplay loop), C (robustness), and D (gameplay
-> depth) are DONE.** A+B via PRs #2–#6; C via #7–#11; **D via #12–#19** (same multi-agent orchestration:
-> opus-4.8 workers in git worktrees, orchestrator audit + squash-merge; three waves — backend foundations,
-> shared-file dependents, then consolidated front-end). Test suite 22 → 90 → 156 → **261 checks**
-> (info-isolation 112 + gameplay-chat 51 + gameplay-reveal 98). tsc/eslint/Turbopack build green.
-> Next up: **Batch E (robustness lows & housekeeping)** or **Batch F (content & reach)**.
-> Deferred follow-ups from C: first-come-exclusive private clues (part of C8); signed reconnect cookie to
-> rebind a seat (part of C5/D2); private-chat not-configured still yields a canned line (KI-059, Batch E);
-> compaction read-modify-write vs a concurrent `present-clue` is a narrow, self-healing race (Batch E nit).
+> **Status 2026-07-02:** ✅ **Batches A (security), B (min gameplay loop), C (robustness), D (gameplay
+> depth), and E (robustness lows & housekeeping) are DONE.** A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**;
+> **E via #21–#25** (same multi-agent orchestration: opus-4.8 workers in git worktrees, orchestrator audit +
+> squash-merge; E ran as a single file-disjoint parallel wave of 4 workers). Test suite 22 → 90 → 156 → 261 →
+> **268 checks** (info-isolation 112 + gameplay-chat 51 + gameplay-reveal 98 + scenario-validation 7).
+> tsc/eslint/Turbopack build green. Next up: **Batch F (content & reach)**.
+> Deferred follow-ups still open: first-come-exclusive private clues (part of C8); signed reconnect cookie to
+> rebind a seat (part of C5/D2); the compaction read-modify-write vs a concurrent `present-clue` is a narrow,
+> self-healing race (accepted). (KI-059 provider/key mismatch was closed in Batch E / PR #23; the genuinely
+> no-key case correctly still yields the canned offline line, now with a one-time server warning.)
 > Earlier deferred: auto NPC self-intro on INTRO entry; unwrapped player lines inside the group-chat
 > `groupContext` are a minor residual injection surface (guard covers phase-change claims).
 
@@ -128,17 +129,26 @@
   `Clue.prerequisite` gating (own clues ∪ public) + schema global-id uniqueness / reference / WHITE-GRAY-BLACK
   acyclic check. **Files:** `room-investigation.ts`, `schema.ts`, `RoomPanels.tsx`. — **S/M**
 
-## Batch E — Robustness lows & housekeeping 🧹
+## Batch E — Robustness lows & housekeeping 🧹 ✅ DONE (PRs #21–#25)
 
-- [ ] **E1 · KI-052 / KI-053 — SSE `cancel()` cleanup + `globalThis` db handle for HMR.** — **S**
-- [ ] **E2 · KI-054 / KI-055 — finished-room TTL/cleanup + rate-limit `resolve/[code]`.** — **S**
-- [ ] **E3 · KI-056 (=KI-028) — strengthen startup validation:** clue-id uniqueness, exactly-one-killer,
-  `availableInRound` range, referential integrity. **File:** `lib/scenarios/schema.ts`. — **S**
-- [ ] **E4 · KI-058 (=KI-016) / KI-060 (=KI-009) — memory summarization in room path; lower chat
-  `maxOutputTokens` to ~300-600.** — **S**
-- [ ] **E5 · KI-059 — surface provider/key mismatch instead of silent canned-line degrade.** — **S**
-- [ ] **E6 · KI-062 — only auto-scroll when already at bottom.** **File:** `RoomPanels.tsx`. — **S**
-- [ ] **E7 · KI-033 — update `AGENTS.md` (stale stack) to defer to ARCHITECTURE.md.** — **S**
+- [x] **E1 · KI-052 / KI-053 — SSE `cancel()` cleanup + `globalThis` db handle for HMR.** ✅ PR #21 — **S**
+  ReadableStream `cancel()` runs the hoisted idempotent cleanup (abort + cancel both safe); db handle on
+  `globalThis.__roomsDb` (mirrors room-bus).
+- [x] **E2 · KI-054 / KI-055 — finished-room TTL/cleanup + rate-limit `resolve/[code]`.** ✅ PR #21 — **S**
+  `pruneFinishedRooms` (`ROOM_TTL_MS`, 24h default) swept ≤ once/hour in `createRoom`, never touches
+  lobby/in_progress; per-IP sliding window (30/60s) → 429 on `resolve/[code]`.
+- [x] **E3 · KI-056 (=KI-028) — strengthen startup validation:** ✅ PR #22 exactly-one-killer, integer
+  `availableInRound` ≥ 1, relationship `characterId` referential integrity (clue-id uniqueness + acyclic
+  prereqs already from D6). New `tests/scenario-validation.test.ts`. **File:** `lib/scenarios/schema.ts`. — **S**
+- [x] **E4 · KI-058 (=KI-016) / KI-060 (=KI-009) — lower chat `maxOutputTokens`.** ✅ PR #23 —
+  `CHAT_MAX_OUTPUT_TOKENS=500` (was 5000) in both NPC stream calls. **KI-058 was already resolved in Batch C**
+  (group-chat compaction + private-chat 16-msg model-input truncation), so E4 = the token cap only. — **S**
+- [x] **E5 · KI-059 — surface provider/key mismatch instead of silent canned-line degrade.** ✅ PR #23 —
+  `getLLMProvider()` auto-selects the provider whose key is present when `LLM_PROVIDER` is unset; `streamChat`
+  emits a one-time `console.warn` on a degraded/mismatched config. — **S**
+- [x] **E6 · KI-062 — only auto-scroll when already at bottom.** ✅ PR #24 — both chat panels track a near-bottom
+  flag (80px) via a native listener on the real `ScrollArea` viewport. **File:** `RoomPanels.tsx`. — **S**
+- [x] **E7 · KI-033 — update `AGENTS.md` (stale stack) to defer to ARCHITECTURE.md.** ✅ PR #25 — **S**
 
 ## Batch F — Content & reach 📚
 
