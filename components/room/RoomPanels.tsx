@@ -20,6 +20,30 @@ export function humanCharacterIds(view: PlayerRoomView): Set<string> {
   );
 }
 
+// ---------- Roster presence bits (D2) ----------
+// Public-safe: reads only PublicPlayer fields (connected / controlledByNpc). Never a raw playerId.
+
+function PresenceDot({ connected }: { connected: boolean }) {
+  return (
+    <span
+      aria-label={connected ? '在线' : '离线'}
+      title={connected ? '在线' : '离线'}
+      className={[
+        'inline-block h-2 w-2 shrink-0 rounded-full',
+        connected ? 'bg-emerald-400' : 'bg-slate-500',
+      ].join(' ')}
+    />
+  );
+}
+
+function NpcChip() {
+  return (
+    <span className="rounded-full border border-sky-500/40 bg-sky-900/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-200">
+      AI 接管
+    </span>
+  );
+}
+
 // ---------- Lobby ----------
 
 export function Lobby({
@@ -76,9 +100,13 @@ export function Lobby({
               key={player.publicId}
               className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
             >
-              <span className="text-slate-100">
-                {player.name}
-                {player.isSelf && <span className="ml-1 text-amber-300">（你）</span>}
+              <span className="flex items-center gap-2 text-slate-100">
+                <PresenceDot connected={player.connected} />
+                <span>
+                  {player.name}
+                  {player.isSelf && <span className="ml-1 text-amber-300">（你）</span>}
+                </span>
+                {player.controlledByNpc && <NpcChip />}
               </span>
               <span className="flex items-center gap-2">
                 {player.isHost && <span className="text-xs text-amber-300">房主</span>}
@@ -114,6 +142,36 @@ export function Lobby({
           未被玩家选中的角色将由 AI 扮演。开始后将随机为每位玩家分配一个角色。
         </p>
       </div>
+    </div>
+  );
+}
+
+// ---------- In-progress roster (D2) ----------
+// Compact presence list for the in-progress game (host/next-worker mounts this in RoomClient). Keyed
+// by publicId; renders only public player fields — never a raw playerId or any private role data.
+
+export function Roster({ view }: { view: PlayerRoomView }) {
+  return (
+    <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 backdrop-blur">
+      <p className="text-xs uppercase tracking-[0.24em] text-slate-400">玩家在场</p>
+      <ul className="mt-3 space-y-2">
+        {view.room.players.map(player => (
+          <li
+            key={player.publicId}
+            className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+          >
+            <span className="flex items-center gap-2 text-slate-100">
+              <PresenceDot connected={player.connected} />
+              <span>
+                {player.name}
+                {player.isSelf && <span className="ml-1 text-amber-300">（你）</span>}
+              </span>
+              {player.controlledByNpc && <NpcChip />}
+            </span>
+            {player.isHost && <span className="text-xs text-amber-300">房主</span>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -213,20 +271,66 @@ export function GroupChatPanel({
   messages,
   streaming,
   onSend,
+  onNudge,
 }: {
   view: PlayerRoomView;
   messages: ChatMessage[];
   // C1: one entry per NPC currently streaming this turn (multiple can type at once).
   streaming: { id: string; characterId: string; text: string }[];
   onSend: (message: string) => void;
+  // D3(a): optional — when provided, a "催一下" button prompts the NPCs after the room goes idle.
+  // The current RoomClient call-site does not pass it yet; a later worker wires it up.
+  onNudge?: () => void;
 }) {
   const names = useMemo(() => nameMapOf(view), [view]);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
 
+  // D3(a): client-side idle detection. `idle` flips true ~25s after the last chat activity (a new
+  // message or a streaming-state change) and resets on every such change — same deps as auto-scroll.
+  const [idle, setIdle] = useState(false);
+  // Post-click debounce so one nudge can't be spammed.
+  const [nudgeCooling, setNudgeCooling] = useState(false);
+  const nudgeCooldownRef = useRef<number | null>(null);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, streaming]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIdle(true), 25000);
+    // Reset on every activity change (cleanup runs before the next effect) so a fresh 25s window starts.
+    return () => {
+      window.clearTimeout(timer);
+      setIdle(false);
+    };
+  }, [messages, streaming]);
+
+  useEffect(() => () => {
+    if (nudgeCooldownRef.current !== null) {
+      window.clearTimeout(nudgeCooldownRef.current);
+    }
+  }, []);
+
+  const allowsChat = getPhaseConfig(view.room.currentPhase).allowsChat;
+  // Enabled only when a handler exists, the room has gone idle, chat is open, nothing is streaming,
+  // and we are not in the post-click cooldown. Never rendered/enabled when onNudge is undefined.
+  const nudgeReady = Boolean(onNudge) && idle && allowsChat && streaming.length === 0 && !nudgeCooling;
+
+  const nudge = () => {
+    if (!onNudge || !nudgeReady) {
+      return;
+    }
+    onNudge();
+    setNudgeCooling(true);
+    if (nudgeCooldownRef.current !== null) {
+      window.clearTimeout(nudgeCooldownRef.current);
+    }
+    nudgeCooldownRef.current = window.setTimeout(() => {
+      setNudgeCooling(false);
+      nudgeCooldownRef.current = null;
+    }, 8000);
+  };
 
   const speakerName = (message: ChatMessage): string => {
     if (message.role === 'player') {
@@ -305,6 +409,18 @@ export function GroupChatPanel({
           placeholder="在公共讨论中发言..."
           className="border-slate-600 bg-slate-900/80 text-slate-100 placeholder:text-slate-500"
         />
+        {/* D3(a): only mounted when a handler is wired; disabled until the room is idle. */}
+        {onNudge && (
+          <Button
+            type="button"
+            onClick={nudge}
+            disabled={!nudgeReady}
+            variant="outline"
+            className="border-amber-500/50 bg-amber-900/20 text-amber-100 hover:bg-amber-900/40"
+          >
+            催一下
+          </Button>
+        )}
         <Button type="submit" disabled={!input.trim()} className="bg-amber-700 text-amber-50 hover:bg-amber-600">
           发送
         </Button>
@@ -472,6 +588,8 @@ export function InvestigationRoom({
       <p className="mt-1 text-sm text-slate-300">
         本阶段剩余搜证次数：{remaining}/{view.room.investigationBudget}
       </p>
+      {/* D6: static hint only — never expose clue content/significance/prerequisite ids or counts. */}
+      <p className="mt-1 text-xs text-slate-400">部分线索需先找到前置线索后才能获取。</p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {view.scenario.locations.map(location => (
@@ -593,8 +711,23 @@ export function VotingRoom({
 
 // ---------- Reveal ----------
 
+// D5(b): the reveal unfolds in ordered, client-only stages (pure front-end pacing — no server events).
+// A "继续" button walks through them; each higher stage keeps everything below it visible.
+const REVEAL_STAGE = {
+  banner: 0,
+  killer: 1,
+  truth: 2,
+  tally: 3,
+  ballots: 4,
+  recap: 5,
+} as const;
+const REVEAL_STAGE_MAX = REVEAL_STAGE.recap;
+
 export function RevealRoom({ view }: { view: PlayerRoomView }) {
   const reveal = view.reveal;
+  // D5(b): staged reveal gate (client-only). Hook order must stay stable, so declare before any early
+  // return — the `reveal` guard below still short-circuits rendering when there is nothing to show.
+  const [stage, setStage] = useState<number>(REVEAL_STAGE.banner);
   if (!reveal) {
     return null;
   }
@@ -611,6 +744,12 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
   const youVotedCorrect = !reveal.youWereKiller && view.room.youVotedFor
     ? view.room.youVotedFor === reveal.killerCharacterId
     : undefined;
+
+  // Human/AI annotation for a voter — resolved from the public `cast` map, never a playerId.
+  const castLabel = (characterId: string): string => {
+    const castEntry = reveal.cast.find(c => c.characterId === characterId);
+    return castEntry?.playerName ? `玩家：${castEntry.playerName}` : 'AI';
+  };
 
   return (
     <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-6 backdrop-blur">
@@ -632,38 +771,146 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
         )}
       </div>
 
-      <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3">
-        <p className="text-sm text-amber-100/90">真凶</p>
-        <p className="mt-1 text-2xl font-bold text-amber-100">{killerName}</p>
-        <p className="mt-1 text-xs text-amber-100/80">
-          全体指认：{reveal.accusedCharacterId ? names.get(reveal.accusedCharacterId) : '未达成多数'}
-          {reveal.accusedCharacterId && (reveal.groupCorrect ? '（正确）' : '（错误）')}
-        </p>
-      </div>
+      {stage >= REVEAL_STAGE.killer && (
+        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3">
+          <p className="text-sm text-amber-100/90">真凶</p>
+          <p className="mt-1 text-2xl font-bold text-amber-100">{killerName}</p>
+          <p className="mt-1 text-xs text-amber-100/80">
+            全体指认：{reveal.accusedCharacterId ? names.get(reveal.accusedCharacterId) : '未达成多数'}
+            {reveal.accusedCharacterId && (reveal.groupCorrect ? '（正确）' : '（错误）')}
+          </p>
+        </div>
+      )}
 
-      <Section title="案件真相">{reveal.truth}</Section>
-      <Section title="作案手法">{reveal.murderMethod}</Section>
-      <Section title="作案动机">{reveal.motive}</Section>
+      {stage >= REVEAL_STAGE.truth && (
+        <>
+          <Section title="案件真相">{reveal.truth}</Section>
+          <Section title="作案手法">{reveal.murderMethod}</Section>
+          <Section title="作案动机">{reveal.motive}</Section>
+        </>
+      )}
 
-      <Section title="角色归属与得票">
-        <ul className="space-y-1">
-          {reveal.tally.map(entry => {
-            const castEntry = reveal.cast.find(c => c.characterId === entry.characterId);
-            return (
-              <li key={entry.characterId} className="flex justify-between">
-                <span>
-                  {names.get(entry.characterId)}
-                  <span className="ml-1 text-xs text-slate-400">
-                    （{castEntry?.playerName ? `玩家：${castEntry.playerName}` : 'AI'}）
+      {stage >= REVEAL_STAGE.tally && (
+        <Section title="角色归属与得票">
+          <ul className="space-y-1">
+            {reveal.tally.map(entry => {
+              const castEntry = reveal.cast.find(c => c.characterId === entry.characterId);
+              return (
+                <li key={entry.characterId} className="flex justify-between">
+                  <span>
+                    {names.get(entry.characterId)}
+                    <span className="ml-1 text-xs text-slate-400">
+                      （{castEntry?.playerName ? `玩家：${castEntry.playerName}` : 'AI'}）
+                    </span>
+                    {entry.characterId === reveal.killerCharacterId && <span className="ml-1 text-rose-300">· 凶手</span>}
                   </span>
-                  {entry.characterId === reveal.killerCharacterId && <span className="ml-1 text-rose-300">· 凶手</span>}
-                </span>
-                <span className="text-slate-400">{entry.votes} 票</span>
-              </li>
-            );
-          })}
-        </ul>
-      </Section>
+                  <span className="text-slate-400">{entry.votes} 票</span>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+
+      {stage >= REVEAL_STAGE.ballots && (
+        <Section title="逐票明细">
+          {reveal.ballots.length === 0 ? (
+            <p className="text-sm text-slate-400">本局没有有效投票。</p>
+          ) : (
+            <ul className="space-y-1">
+              {reveal.ballots.map((ballot, index) => (
+                <li key={`${ballot.voterCharacterId}:${index}`} className="flex flex-wrap items-center gap-x-1.5">
+                  <span className="text-slate-100">{names.get(ballot.voterCharacterId) ?? ballot.voterCharacterId}</span>
+                  <span className="text-xs text-slate-400">（{castLabel(ballot.voterCharacterId)}）</span>
+                  <span className="text-slate-500">→</span>
+                  <span className="text-slate-100">{names.get(ballot.accusedCharacterId) ?? ballot.accusedCharacterId}</span>
+                  {ballot.accusedCharacterId === reveal.killerCharacterId && <span className="text-xs text-rose-300">· 凶手</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
+
+      {/* Per-character script recap — reveal.characters carries full private data and is ONLY present at
+          REVEAL (projection attaches it only then). Rendering it here is safe; do NOT reuse elsewhere. */}
+      {stage >= REVEAL_STAGE.recap && (
+        <div className="mt-6">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">角色剧本复盘</p>
+          <div className="mt-2 space-y-4">
+            {reveal.characters.map(character => (
+              <div key={character.id} className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-base font-semibold text-amber-100">{character.name}</p>
+                  <span className="text-xs text-slate-400">{character.age}岁 · {character.occupation}</span>
+                  {character.isKiller && (
+                    <span className="rounded-full border border-rose-500/50 bg-rose-900/20 px-2 py-0.5 text-xs text-rose-200">
+                      真凶
+                    </span>
+                  )}
+                </div>
+
+                <Section title="私密剧本">{character.privateScript}</Section>
+
+                <Section title="不在场证明">
+                  <p>对外宣称：{character.alibi.claimed}</p>
+                  <p className="mt-1 text-amber-200/90">真实行踪：{character.alibi.truth}</p>
+                </Section>
+
+                {character.objectives.length > 0 && (
+                  <Section title="任务目标">
+                    <ul className="list-disc space-y-1 pl-5">
+                      {character.objectives.map((objective, index) => (
+                        <li key={index}>{objective.description}</li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {character.secrets.length > 0 && (
+                  <Section title="隐藏的秘密">
+                    <ul className="list-disc space-y-1 pl-5">
+                      {character.secrets.map((secret, index) => (
+                        <li key={index}>{secret}</li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {character.relationships.length > 0 && (
+                  <Section title="人物关系">
+                    <ul className="space-y-1">
+                      {character.relationships.map((relationship, index) => (
+                        <li key={index}>
+                          <span className="text-slate-100">
+                            {names.get(relationship.characterId) ?? relationship.characterId}
+                          </span>
+                          <span className="ml-1">：{relationship.publicRelation}</span>
+                          {relationship.privateRelation && (
+                            <span className="ml-1 text-amber-200/90">（实际：{relationship.privateRelation}）</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {stage < REVEAL_STAGE_MAX && (
+        <div className="mt-6">
+          <Button
+            type="button"
+            onClick={() => setStage(current => Math.min(current + 1, REVEAL_STAGE_MAX))}
+            className="bg-amber-700 text-amber-50 hover:bg-amber-600"
+          >
+            继续
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
