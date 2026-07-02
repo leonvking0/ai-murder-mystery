@@ -245,6 +245,13 @@ export interface Room {
 
   // playerId -> accused characterId
   votes: Record<string, string>;
+  // Per-(player, phase) investigation counter, keyed `${playerId}:${phase}` (C8 / KI-042). Bounded by
+  // INVESTIGATION_BUDGET; one investigateRoom() call = one unit. Optional so pre-existing rows default
+  // to "nothing spent".
+  investigationCounts?: Record<string, number>;
+  // How many tie-triggered revotes have already been granted this game (C9 / KI-043). Capped at 1 so a
+  // persistent tie eventually resolves to REVEAL (killer escapes) instead of looping forever.
+  voteRevoteCount?: number;
 
   createdAt: number;
   updatedAt: number;
@@ -341,6 +348,16 @@ export interface PlayerRoomView {
     yourPrivateChats: Record<string, ChatMessage[]>; // keyed by NPC characterId
     voteCount: number;
     youVotedFor?: string;
+    // C8 investigation budget (public-safe): the per-phase cap and how many searches THIS player has
+    // already spent in the current phase.
+    investigationBudget: number;
+    yourInvestigationsThisPhase: number;
+    // C9 voting integrity (public-safe counts only — never who-voted-for-whom pre-reveal): how many
+    // connected humans there are, how many have voted, whether all have, and the tie-revote counter.
+    connectedHumanCount: number;
+    humansVotedCount: number;
+    allHumansVoted: boolean;
+    voteRevoteCount: number;
   };
   you: Player;
   scenario: ScenarioPublic;

@@ -5,6 +5,13 @@ import { randomUUID } from 'node:crypto';
 
 import type { ChatMessage, Clue, GamePhase, Room, Scenario } from '@/types/game';
 
+// C8 / KI-042: how many independent searches a single player may run within one investigation phase.
+// One investigateRoom() call = one unit, regardless of how many clues that search turned up. The budget
+// is tracked per (playerId, phase) in room.investigationCounts and resets naturally each phase (the key
+// embeds the phase). Enforced inside investigateRoom() so the atomic updateRoom() transaction rolls the
+// whole search back when the budget is exhausted.
+export const INVESTIGATION_BUDGET = 2;
+
 function investigationRound(phase: GamePhase): number | null {
   if (phase === 'INVESTIGATION_1') {
     return 1;
@@ -40,6 +47,14 @@ export function investigateRoom(
   const round = investigationRound(room.currentPhase);
   if (!round) {
     throw new Error(`Investigation is not allowed during phase ${room.currentPhase}`);
+  }
+
+  // C8 / KI-042: enforce the per-phase search budget BEFORE doing any work. The key embeds the current
+  // phase so INVESTIGATION_1 and INVESTIGATION_2 have independent budgets.
+  const budgetKey = `${playerId}:${room.currentPhase}`;
+  const usedThisPhase = room.investigationCounts?.[budgetKey] ?? 0;
+  if (usedThisPhase >= INVESTIGATION_BUDGET) {
+    throw new Error('本阶段搜证次数已用完');
   }
 
   const available = location.clues.filter(clue => clue.availableInRound <= round);
@@ -104,6 +119,8 @@ export function investigateRoom(
     characterMemories: nextMemories,
     discoveredClues: { ...room.discoveredClues, [playerId]: nextPlayerClues },
     groupChatHistory: [...room.groupChatHistory, ...systemMessages],
+    // C8: consume one budget unit for this successful search.
+    investigationCounts: { ...(room.investigationCounts ?? {}), [budgetKey]: usedThisPhase + 1 },
   };
 
   return {
