@@ -11,6 +11,11 @@ import { isLLMConfigured, streamChat } from '@/lib/agents/llm-provider';
 import { toScenarioPublic } from '@/lib/scenarios/projection';
 import { listScenarios } from '@/lib/scenarios/registry';
 
+// NPC chat replies are 1–3 sentences (incl. a short VOTING defense line) and fit comfortably under
+// 500 output tokens. The old 5000 ceiling was a wasteful over-allocation — the "prevent
+// hallucination" rationale for it was incorrect; a lower cap does not change reply content.
+const CHAT_MAX_OUTPUT_TOKENS = 500;
+
 interface StreamNPCResponseParams {
   character: Character;
   allCharacters: Character[];
@@ -108,7 +113,7 @@ export async function* streamNPCResponse(
 
     const stream = streamChat({
       system: systemPrompt,
-      maxOutputTokens: 5000,
+      maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       temperature: 0.8,
       messages: [
         ...historyMessages,
@@ -155,7 +160,7 @@ export async function* streamNPCGroupResponse(
 
   const stream = streamChat({
     system: systemPrompt,
-    maxOutputTokens: 5000,
+    maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
     temperature: 0.8,
     messages: [
       {
