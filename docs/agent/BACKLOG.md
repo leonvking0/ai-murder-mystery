@@ -11,11 +11,12 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-01:** ✅ **Batches A (security), B (min gameplay loop), and C (robustness) are DONE.**
-> A+B landed via PRs #2–#6; **C landed via PRs #7–#10** (same multi-agent orchestration: opus-4.8 workers in
-> git worktrees, Fable audit + squash-merge; two waves — CHAT+ENGINE, then FRONT+MEMORY). Test suite 22 → 90
-> → **156 checks** (info-isolation 57 + gameplay-chat 37 + gameplay-reveal 62). tsc/eslint/Turbopack build green.
-> Next up: **Batch D (gameplay depth)** or **Batch E (robustness lows & housekeeping)**.
+> **Status 2026-07-02:** ✅ **Batches A (security), B (min gameplay loop), C (robustness), and D (gameplay
+> depth) are DONE.** A+B via PRs #2–#6; C via #7–#11; **D via #12–#19** (same multi-agent orchestration:
+> opus-4.8 workers in git worktrees, orchestrator audit + squash-merge; three waves — backend foundations,
+> shared-file dependents, then consolidated front-end). Test suite 22 → 90 → 156 → **261 checks**
+> (info-isolation 112 + gameplay-chat 51 + gameplay-reveal 98). tsc/eslint/Turbopack build green.
+> Next up: **Batch E (robustness lows & housekeeping)** or **Batch F (content & reach)**.
 > Deferred follow-ups from C: first-come-exclusive private clues (part of C8); signed reconnect cookie to
 > rebind a seat (part of C5/D2); private-chat not-configured still yields a canned line (KI-059, Batch E);
 > compaction read-modify-write vs a concurrent `present-clue` is a narrow, self-healing race (Batch E nit).
@@ -102,20 +103,30 @@
 
 ## Batch D — Gameplay depth (second tier) 📈
 
-- [ ] **D1 · Always-on "案情档案 + 我的剧本" drawer** (data already in the projection; pure front-end). — **M**
-- [ ] **D2 · Disconnect takeover + host handoff** — set `connected=false` on SSE drop, flip idle seats to
-  NPC (`initializeMemory` + seed public clues), auto-transfer `hostPlayerId`. Closes the "host closes tab =
-  game bricked" gap. **Files:** `events/route.ts`, `room-engine.ts`, `advance/route.ts`, `projection.ts`. — **M**
-- [ ] **D3 · Discussion liveness** — idle nudge button + timer (server path exists), NPC cross-talk (react
-  when named). **Files:** `room-group-chat.ts`, `RoomPanels.tsx`. — **M**
-- [ ] **D4 · Activate emotion/suspicion (KI-010)** — rule-based updates on accusation / clue-hit; render
-  Top-2 suspicions + emotion into the prompt with "fluster when cornered" conditional. **Files:**
-  `group-chat/route.ts`, `memory-manager.ts`, `npc-base.ts`. — **M**
-- [ ] **D5 · Voting-integrity UX** — VOTING opens chat for a defense round; reveal per-ballot tally +
-  staged reveal; render `reveal.characters` script recap. **Files:** `phase-manager.ts`, `RoomPanels.tsx`. — **M**
-- [ ] **D6 · Investigation depth** — fuzzy "someone found something in the study" broadcast on private
-  finds; enable the unused `Clue.prerequisite` chains + acyclic schema check. **Files:**
-  `room-investigation.ts`, `schema.ts`, `RoomPanels.tsx`. — **S/M**
+- [x] **D1 · Always-on "案情档案 + 我的剧本" drawer** (data already in the projection; pure front-end). ✅ PR #19
+  (new `CaseFileDrawer.tsx`: right slide-over, default-collapsed, localStorage-persisted; case/timeline/public
+  cast/own-script/own-clues; private data sourced solely from `view.yourCharacter`, never `view.reveal`). — **M**
+- [x] **D2 · Disconnect takeover + host handoff** ✅ PR #12 — SSE-refcount presence (`markConnected`/
+  `markDisconnected`, multi-tab safe) flips `connected` + stamps server-only `disconnectedAt`; idle-90s human
+  seats flip to NPC (fresh memory + public-clue content only); host auto-transfers to earliest connected human;
+  returning human reclaims their seat. **Also fixed a latent leak**: projection shipped the real `hostPlayerId`
+  → now `hostPublicId`. **Files:** `events/route.ts`, `room-engine.ts`, `group-chat/route.ts` (sweep),
+  `projection.ts`, `room-bus.ts`, `types/game.ts`. — **M**
+- [x] **D3 · Discussion liveness** ✅ PR #13 (cross-talk) + #18/#19 (nudge UI) — NPC cross-talk: re-scan each
+  responder's line, pull named NPCs into the same turn (capped `MAX_RESPONDERS_PER_TURN=4`); idle-nudge button
+  (~25s) wired to the existing self-prompt path. **Files:** `room-group-chat.ts`, `RoomPanels.tsx`, `RoomClient.tsx`. — **M**
+- [x] **D4 · Activate emotion/suspicion (KI-010)** ✅ PR #15 (logic/prompt) + #17 (route wiring) — rule-based
+  reaction: accusation (name + keyword) bumps suspicion toward the accuser (character id, never playerId) +
+  flips emotion; de-escalation ladder on benign turns; own-suspicions + cornered-defense guidance rendered into
+  the **server-only** prompt (no projection/SSE/client surface). **Files:** `memory-manager.ts`, `npc-base.ts`,
+  `group-chat/route.ts`. — **M**
+- [x] **D5 · Voting-integrity UX** ✅ PR #13 (VOTING chat gate) + #16 (ballots) + #18 (reveal UI) — VOTING opens
+  a concurrent defense round (`allowsChat`); per-ballot tally keyed by **character** (never playerId, incl.
+  taken-over seats); client-only staged reveal + `reveal.characters` script recap. **Files:** `phase-manager.ts`,
+  `projection.ts`, `types/game.ts`, `RoomPanels.tsx`, `RoomClient.tsx`. — **M**
+- [x] **D6 · Investigation depth** ✅ PR #14 — fuzzy anonymized find-hint (location name only) on private finds;
+  `Clue.prerequisite` gating (own clues ∪ public) + schema global-id uniqueness / reference / WHITE-GRAY-BLACK
+  acyclic check. **Files:** `room-investigation.ts`, `schema.ts`, `RoomPanels.tsx`. — **S/M**
 
 ## Batch E — Robustness lows & housekeeping 🧹
 
