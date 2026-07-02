@@ -60,13 +60,39 @@ export function validateScenario(data: unknown): Scenario {
   if (!Array.isArray(scenario.characters) || scenario.characters.length === 0) {
     throw new ScenarioValidationError('characters must be a non-empty array', 'characters');
   }
-  let hasKiller = false;
   for (let i = 0; i < scenario.characters.length; i++) {
     validateCharacter(scenario.characters[i], `characters[${i}]`);
-    if ((scenario.characters[i] as Character).isKiller) hasKiller = true;
   }
-  if (!hasKiller) {
-    throw new ScenarioValidationError('At least one character must be the killer', 'characters');
+  // Exactly one killer. The engine is single-killer today, so 0 (unsolvable) or >1 (e.g. a duplicate
+  // isKiller flag) are both data errors that must fail startup rather than corrupt the reveal.
+  const killerCount = scenario.characters.filter(c => (c as Character).isKiller).length;
+  if (killerCount !== 1) {
+    throw new ScenarioValidationError(
+      killerCount === 0
+        ? 'Exactly one character must be the killer, but none is flagged isKiller'
+        : `Exactly one character must be the killer, but ${killerCount} are flagged isKiller`,
+      'characters',
+    );
+  }
+
+  // Relationship referential integrity: every relationships[].characterId must reference a character
+  // that exists in this scenario. Runs after the character loop so all ids are known.
+  const characterIds = new Set(scenario.characters.map(c => (c as Character).id));
+  for (let i = 0; i < scenario.characters.length; i++) {
+    const relationships = (scenario.characters[i] as Record<string, unknown>).relationships as unknown[];
+    for (let j = 0; j < relationships.length; j++) {
+      const rel = relationships[j];
+      if (!rel || typeof rel !== 'object') {
+        throw new ScenarioValidationError('relationship must be an object', `characters[${i}].relationships[${j}]`);
+      }
+      const targetId = (rel as Record<string, unknown>).characterId;
+      if (typeof targetId !== 'string' || !targetId) {
+        throw new ScenarioValidationError('relationship must have a characterId string', `characters[${i}].relationships[${j}].characterId`);
+      }
+      if (!characterIds.has(targetId)) {
+        throw new ScenarioValidationError(`relationship references unknown character id "${targetId}"`, `characters[${i}].relationships[${j}].characterId`);
+      }
+    }
   }
 
   // Locations
@@ -238,8 +264,12 @@ function validateClue(clue: unknown, path: string): void {
   if (typeof c.significance !== 'string') {
     throw new ScenarioValidationError('Missing significance', `${path}.significance`);
   }
-  if (typeof c.availableInRound !== 'number') {
-    throw new ScenarioValidationError('availableInRound must be a number', `${path}.availableInRound`);
+  if (
+    typeof c.availableInRound !== 'number' ||
+    !Number.isInteger(c.availableInRound) ||
+    (c.availableInRound as number) < 1
+  ) {
+    throw new ScenarioValidationError('availableInRound must be a positive integer (>= 1)', `${path}.availableInRound`);
   }
   if (c.prerequisite !== undefined && typeof c.prerequisite !== 'string') {
     throw new ScenarioValidationError('prerequisite must be a string', `${path}.prerequisite`);
