@@ -27,6 +27,11 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
     return Response.json({ error: 'Not a member of this room' }, { status: 403 });
   }
 
+  // Hoisted so both the abort listener and the ReadableStream `cancel()` reach the same idempotent
+  // cleanup. A consumer cancel (client disconnect that never fires `abort`) otherwise leaks the
+  // emitter listener + heartbeat interval and leaves the player marked online (KI-052).
+  let cleanup = () => {};
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
@@ -81,7 +86,7 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
         }
       }
 
-      const cleanup = () => {
+      cleanup = () => {
         if (closed) {
           return;
         }
@@ -115,6 +120,11 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
       };
 
       req.signal.addEventListener('abort', cleanup);
+    },
+    // A consumer-side cancel (client disconnect that doesn't fire `abort`) runs the same idempotent
+    // cleanup — safe to call twice since `cleanup` is guarded by `closed`.
+    cancel() {
+      cleanup();
     },
   });
 
