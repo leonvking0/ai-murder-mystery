@@ -21,7 +21,7 @@ const { computeNpcVote, tryReserveNpcTrigger } = await import('../lib/agents/npc
 // room-group-chat is deliberately strip-types-loadable (it lazy-imports npc-agent), so we can drive
 // the group-turn generator offline. No LLM is configured here (keys deleted above), so the default
 // path takes the not-configured branch; the success/failure paths are exercised via injected deps.
-const { manageRoomGroupResponse } = await import('../lib/agents/room-group-chat.ts');
+const { manageRoomGroupResponse, MAX_RESPONDERS_PER_TURN } = await import('../lib/agents/room-group-chat.ts');
 
 let pass = 0;
 let fail = 0;
@@ -74,13 +74,17 @@ check('DISCUSSION_1 allows chat', getPhaseConfig('DISCUSSION_1').allowsChat === 
 check('DISCUSSION_2 allows chat', getPhaseConfig('DISCUSSION_2').allowsChat === true);
 check('FINAL_DISCUSSION allows chat', getPhaseConfig('FINAL_DISCUSSION').allowsChat === true);
 check(
-  'LOBBY / READING / INVESTIGATION / VOTING / REVEAL block chat',
+  'LOBBY / READING / INVESTIGATION / REVEAL block chat',
   !getPhaseConfig('LOBBY').allowsChat
     && !getPhaseConfig('READING').allowsChat
     && !getPhaseConfig('INVESTIGATION_1').allowsChat
-    && !getPhaseConfig('VOTING').allowsChat
+    && !getPhaseConfig('INVESTIGATION_2').allowsChat
     && !getPhaseConfig('REVEAL').allowsChat,
 );
+// D5(a): VOTING now OPENS chat (a defense round runs concurrently with balloting) while keeping votes
+// enabled — a single gate read by group-chat / private-chat / present-clue routes and the group turn.
+check('VOTING allows chat (D5(a) defense round)', getPhaseConfig('VOTING').allowsChat === true);
+check('VOTING still allows voting', getPhaseConfig('VOTING').allowsVoting === true);
 
 // ── B4: NPC voting (rule-based fallback, no LLM configured) ───────────────────
 console.log('NPC voting (rule-based, no LLM):');
@@ -297,6 +301,127 @@ const throttleFirst = await collectTurn(manageRoomGroupResponse(throttleRoom, gr
 const throttleSecond = await collectTurn(manageRoomGroupResponse(throttleRoom, groupScenario, '第二句', okDeps));
 check('throttle: first unprompted trigger produces a turn', throttleFirst.some(event => event.kind === 'start'));
 check('throttle: second immediate unprompted trigger yields nothing', throttleSecond.length === 0);
+
+// ── D3(b) NPC cross-talk + D3(a) nudge ───────────────────────────────────────
+// Cross-talk: when a responder names another NPC in its OWN line, that NPC is pulled into the SAME
+// turn (bypassing the human trigger, which never named it) — subject to MAX_RESPONDERS_PER_TURN and
+// dedup. Nudge: an empty-triggerText self-prompt still yields a normal turn.
+console.log('NPC cross-talk (D3b) + nudge (D3a):');
+
+function makeMultiNpcRoom(id: string, phase: GamePhase, npcs: Character[]): Room {
+  const characterControl: Record<string, { kind: 'npc' }> = {};
+  const characterMemories: Record<string, CharacterMemory> = {};
+  for (const npc of npcs) {
+    characterControl[npc.id] = { kind: 'npc' };
+    characterMemories[npc.id] = makeMemory(npc.id, []);
+  }
+  return {
+    id,
+    code: 'CODE',
+    scenarioId: 'scn-test',
+    status: 'in_progress',
+    currentPhase: phase,
+    round: 1,
+    hostPlayerId: 'host',
+    players: [],
+    characterControl,
+    characterMemories,
+    discoveredClues: {},
+    publicClues: [],
+    groupChatHistory: [],
+    privateChats: {},
+    votes: {},
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+// Injected stream whose single line is chosen by the responder's own character id (default: a neutral
+// line that names nobody, so a pulled-in NPC does not itself pull anyone further).
+function scriptedDeps(byId: Record<string, string>, fallback = '我没什么要补充的。'): GroupResponseDeps {
+  return {
+    isConfigured: () => true,
+    streamResponse: params => gen([byId[params.character.id] ?? fallback]),
+  };
+}
+
+let xtSeq = 0;
+function xtRoomId(): string {
+  xtSeq += 1;
+  return `xtalk-${Date.now()}-${xtSeq}`; // unique ⇒ fresh throttle bucket ⇒ first trigger always allowed
+}
+
+const npcA = makeCharacter('ca', '甲');
+const npcB = makeCharacter('cb', '乙');
+const npcC = makeCharacter('cc', '丙');
+const trioScenario = makeGroupScenario([npcA, npcB, npcC]);
+
+// Genuine pull-in: with 3 NPCs the unmentioned base pick is the 2 quietest (甲, 乙); 丙 is NOT picked.
+// The human line names nobody, yet 甲's reply names 丙 → cross-talk must pull 丙 into the same turn.
+const pullRoom = makeMultiNpcRoom(xtRoomId(), 'DISCUSSION_1', [npcA, npcB, npcC]);
+const pullEvents = await collectTurn(
+  manageRoomGroupResponse(pullRoom, trioScenario, '大家好', scriptedDeps({ ca: '我认为丙很可疑。' })),
+);
+const pullStarted = pullEvents.filter(event => event.kind === 'start').map(event => event.characterId);
+check(
+  'cross-talk pulls a named non-base NPC (丙) into the SAME turn though the human never named it',
+  pullStarted.includes('cc'),
+);
+check(
+  'cross-talk: the pulled-in NPC (丙) also gets a terminal done',
+  pullEvents.some(event => event.kind === 'done' && event.characterId === 'cc'),
+);
+
+// Literal 2-NPC case (per task): both NPCs are base-picked, so a responder naming the other must NOT
+// double-schedule it — exactly one start/done for the named NPC.
+const npcDa = makeCharacter('da', '甲');
+const npcDb = makeCharacter('db', '乙');
+const duoScenario = makeGroupScenario([npcDa, npcDb]);
+const duoRoom = makeMultiNpcRoom(xtRoomId(), 'DISCUSSION_1', [npcDa, npcDb]);
+const duoEvents = await collectTurn(
+  manageRoomGroupResponse(duoRoom, duoScenario, '大家好', scriptedDeps({ da: '乙，你昨晚在哪里？' })),
+);
+const dbStarts = duoEvents.filter(event => event.kind === 'start' && event.characterId === 'db');
+const dbDones = duoEvents.filter(event => event.kind === 'done' && event.characterId === 'db');
+check('2-NPC: the named NPC (乙) responds in the same turn', dbStarts.length >= 1 && dbDones.length >= 1);
+check('2-NPC: a named-but-already-scheduled NPC is not double-added', dbStarts.length === 1 && dbDones.length === 1);
+
+// Dedup: 丙 is named twice within 甲's line AND again by 乙 (both base-picked) → still exactly one
+// start/done for 丙 (mentionedNpcIds dedups within a line; the `scheduled` set dedups across responders).
+const dedupRoom = makeMultiNpcRoom(xtRoomId(), 'DISCUSSION_1', [npcA, npcB, npcC]);
+const dedupEvents = await collectTurn(
+  manageRoomGroupResponse(dedupRoom, trioScenario, '大家好', scriptedDeps({ ca: '丙丙最可疑。', cb: '没错，丙的说法有问题。' })),
+);
+const ccStarts = dedupEvents.filter(event => event.kind === 'start' && event.characterId === 'cc');
+const ccDones = dedupEvents.filter(event => event.kind === 'done' && event.characterId === 'cc');
+check('dedup: an NPC named repeatedly (in one line and by two responders) still gets exactly one start', ccStarts.length === 1);
+check('dedup: ...and exactly one done', ccDones.length === 1);
+
+// Cap: 5 NPCs each naming every character (self filtered out). Base pick is 2, cross-talk saturates up
+// to the cap and then stops — distinct responders == MAX_RESPONDERS_PER_TURN, and the loop terminates
+// (the collectTurn resolving at all proves no infinite re-scheduling).
+const fiveNames = ['甲', '乙', '丙', '丁', '戊'];
+const five = fiveNames.map((name, index) => makeCharacter(`p${index + 1}`, name));
+const fiveScenario = makeGroupScenario(five);
+const capRoom = makeMultiNpcRoom(xtRoomId(), 'DISCUSSION_1', five);
+const allNames = fiveNames.join('');
+const capDeps = scriptedDeps(Object.fromEntries(five.map(character => [character.id, allNames])), allNames);
+const capEvents = await collectTurn(manageRoomGroupResponse(capRoom, fiveScenario, '大家好', capDeps));
+const capStarts = capEvents.filter(event => event.kind === 'start');
+const distinctResponders = new Set(capStarts.map(event => event.characterId));
+check(
+  `cap: distinct responders never exceed MAX_RESPONDERS_PER_TURN (${MAX_RESPONDERS_PER_TURN})`,
+  distinctResponders.size <= MAX_RESPONDERS_PER_TURN,
+);
+check('cap: with everyone naming everyone, the turn saturates exactly at the cap', distinctResponders.size === MAX_RESPONDERS_PER_TURN);
+check('cap: no NPC is scheduled twice (one start each) and the turn terminates', capStarts.length === distinctResponders.size);
+
+// D3(a) nudge: the server self-prompt path passes an EMPTY triggerText; it must still yield a normal
+// start→done turn (no mention, no error). Single-NPC room + configured deps.
+const nudgeEvents = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), groupScenario, '', okDeps));
+check('nudge: empty-triggerText self-prompt still yields a start', nudgeEvents.some(event => event.kind === 'start'));
+check('nudge: empty-triggerText self-prompt still yields a terminal done', nudgeEvents.some(event => event.kind === 'done'));
+check('nudge: the self-prompt path emits no error', nudgeEvents.every(event => event.kind !== 'error'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

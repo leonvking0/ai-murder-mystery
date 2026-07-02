@@ -25,6 +25,11 @@ function npcCharacterIds(room: Room): string[] {
     .map(([characterId]) => characterId);
 }
 
+// D3(b): hard cap on how many NPCs may speak in a single group-chat turn — the initial pick (1-3
+// from pickResponders) plus any cross-talk pull-ins. Pinned; it also bounds the pull-in loop so a
+// room where every NPC names every other can never run away or loop forever.
+export const MAX_RESPONDERS_PER_TURN = 4;
+
 // One event per step of a group-chat turn. The route maps these onto public SSE `npc_*` events,
 // owning `turnId`, the per-room lock, and persistence (it builds the ChatMessage with `id = messageId`
 // on `done`). `messageId` is stable across a responder's start→chunk(s)→done.
@@ -131,10 +136,17 @@ export async function* manageRoomGroupResponse(
     return;
   }
 
+  // `responders` is intentionally MUTABLE: D3(b) cross-talk appends any NPC a responder names during
+  // its own turn (see the pull-in below). `scheduled` guards against double-adds — including against
+  // the initial pick — so a named-but-already-queued NPC never gets a second start/done. Throttling is
+  // NOT re-checked here: the route already reserved one token for this POST, and cross-talk pull-ins
+  // are "always allowed but capped" by MAX_RESPONDERS_PER_TURN.
   const responders = pickResponders(scenario, room, mentioned);
   if (responders.length === 0) {
     return;
   }
+  const scheduled = new Set<string>(responders);
+  const npcIds = new Set<string>(npcCharacterIds(room));
 
   // C6: not-configured is a SINGLE terminal event for the whole turn — no per-NPC `start`, no persist,
   // no degraded canned line. Attribute it to the first responder so the client can address the event.
@@ -163,7 +175,10 @@ export async function* manageRoomGroupResponse(
   // to a self-prompt when empty). Never prefix/format player text here.
   const scenarioPublic = toScenarioPublic(scenario);
 
-  for (const characterId of responders) {
+  // Index/while walk over the mutable `responders` array: `responders.length` is re-read each
+  // iteration, so any id appended by the cross-talk pull-in below is processed later in this same turn.
+  for (let index = 0; index < responders.length; index += 1) {
+    const characterId = responders[index];
     const character: Character | undefined = scenario.characters.find(item => item.id === characterId);
     const memory = room.characterMemories[characterId];
     if (!character || !memory) {
@@ -217,6 +232,22 @@ export async function* manageRoomGroupResponse(
     const finalText = content.trim();
     if (finalText) {
       inTurnLines.push(`${characterNameById.get(characterId) ?? characterId}: ${finalText}`);
+
+      // D3(b) NPC cross-talk: if this responder named another NPC (by name or id), pull that NPC into
+      // the SAME turn so a pointed remark gets an in-character reply. Reuses mentionedNpcIds (which
+      // already filters to NPCs and dedupes) against the responder's OWN finalText; we additionally
+      // skip self and anyone already scheduled, and never exceed MAX_RESPONDERS_PER_TURN.
+      if (responders.length < MAX_RESPONDERS_PER_TURN) {
+        for (const mentionedId of mentionedNpcIds(scenario, room, finalText)) {
+          if (responders.length >= MAX_RESPONDERS_PER_TURN) {
+            break;
+          }
+          if (mentionedId !== characterId && npcIds.has(mentionedId) && !scheduled.has(mentionedId)) {
+            scheduled.add(mentionedId);
+            responders.push(mentionedId);
+          }
+        }
+      }
     }
 
     // C4: a responder that started and did not throw always gets exactly one terminal `done` (even
