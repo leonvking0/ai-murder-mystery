@@ -130,11 +130,11 @@ export function projectRoomForPlayer(
     you,
     scenario: toScenarioPublic(scenario),
     yourCharacter,
-    reveal: isReveal ? buildReveal(room, scenario) : undefined,
+    reveal: isReveal ? buildReveal(room, scenario, playerId) : undefined,
   };
 }
 
-function buildReveal(room: Room, scenario: Scenario): PlayerRoomView['reveal'] {
+function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRoomView['reveal'] {
   const killer = scenario.characters.find(character => character.isKiller);
 
   const playerNameById = new Map(room.players.map(player => [player.id, player.name]));
@@ -156,6 +156,18 @@ function buildReveal(room: Room, scenario: Scenario): PlayerRoomView['reveal'] {
   const leaders = tally.filter(entry => entry.votes === topVotes && topVotes > 0);
   const accusedCharacterId = leaders.length === 1 ? leaders[0].characterId : null;
 
+  const groupCorrect = accusedCharacterId !== null && accusedCharacterId === killer?.id;
+
+  // Which character did the requesting player play, and were they the killer?
+  const youCharacterId = room.players.find(player => player.id === playerId)?.assignedCharacterId;
+  const youWereKiller = Boolean(killer && youCharacterId && youCharacterId === killer.id);
+
+  // Faction win/loss for the requester: the killer wins by ESCAPING (group got it wrong); everyone
+  // else wins by catching the killer (group got it right).
+  const outcome: 'win' | 'loss' = youWereKiller
+    ? (groupCorrect ? 'loss' : 'win')
+    : (groupCorrect ? 'win' : 'loss');
+
   return {
     truth: scenario.case.truth,
     murderMethod: scenario.case.murderMethod,
@@ -165,6 +177,8 @@ function buildReveal(room: Room, scenario: Scenario): PlayerRoomView['reveal'] {
     cast,
     tally,
     accusedCharacterId,
-    groupCorrect: accusedCharacterId !== null && accusedCharacterId === killer?.id,
+    groupCorrect,
+    youWereKiller,
+    outcome,
   };
 }

@@ -112,3 +112,62 @@ export function investigateRoom(
     systemMessages,
   };
 }
+
+/**
+ * Present a clue the player already discovered to the whole table, making it public. Mirrors the
+ * public-clue path of `investigateRoom`: the clue joins `room.publicClues` (dedup by id), the fact is
+ * merged into every NPC's `knownFacts`, and a `system` message is posted to group chat. Idempotent —
+ * presenting an already-public clue is a no-op. Throws if the player never discovered the clue.
+ *
+ * NEVER exposes `clue.significance`: only `clue.content` is surfaced to NPC memory + group chat.
+ */
+export function presentClue(
+  room: Room,
+  scenario: Scenario,
+  playerId: string,
+  clueId: string,
+): { room: Room; systemMessages: ChatMessage[] } {
+  const playerClues = room.discoveredClues[playerId] ?? [];
+  const clue = playerClues.find(item => item.id === clueId);
+  if (!clue) {
+    throw new Error(`未在你的笔记中找到该线索：${clueId}`);
+  }
+
+  // Idempotent: already public → nothing to do.
+  if (room.publicClues.some(item => item.id === clue.id)) {
+    return { room, systemMessages: [] };
+  }
+
+  const presenter = room.players.find(item => item.id === playerId);
+  const presenterName = presenter?.name ?? '玩家';
+
+  // Add to the shared public pool.
+  const nextPublicClues = [...room.publicClues, clue];
+
+  // Merge the public fact into every NPC's known facts (never the GM-only significance).
+  const publicFact = `公共线索：${clue.content}`;
+  const nextMemories = Object.fromEntries(
+    Object.entries(room.characterMemories).map(([characterId, memory]) => {
+      const mergedFacts = memory.knownFacts.includes(publicFact)
+        ? memory.knownFacts
+        : [...memory.knownFacts, publicFact];
+      return [characterId, { ...memory, knownFacts: mergedFacts }];
+    }),
+  );
+
+  const systemMessage: ChatMessage = {
+    id: randomUUID(),
+    role: 'system',
+    content: `【出示线索·${presenterName}】${clue.content}`,
+    timestamp: Date.now(),
+  };
+
+  const nextRoom: Room = {
+    ...room,
+    publicClues: nextPublicClues,
+    characterMemories: nextMemories,
+    groupChatHistory: [...room.groupChatHistory, systemMessage],
+  };
+
+  return { room: nextRoom, systemMessages: [systemMessage] };
+}

@@ -270,6 +270,15 @@ export function RoomClient({ code }: RoomClientProps) {
     await refetchState();
   };
 
+  const presentClue = async (clueId: string) => {
+    try {
+      await action('present-clue', { clueId });
+      await refetchState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '出示线索失败');
+    }
+  };
+
   // ---- render ----
 
   if (loadState === 'error') {
@@ -359,14 +368,14 @@ export function RoomClient({ code }: RoomClientProps) {
                 <PrivateChatPanel view={view} onSend={sendPrivate} />
               )}
             </div>
-            <Notebook view={view} />
+            <Notebook view={view} onPresent={presentClue} />
           </div>
         )}
 
         {INVESTIGATION_PHASES.has(phase) && inProgress && (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
             <InvestigationRoom view={view} onInvestigate={investigate} />
-            <Notebook view={view} />
+            <Notebook view={view} onPresent={presentClue} />
           </div>
         )}
 
