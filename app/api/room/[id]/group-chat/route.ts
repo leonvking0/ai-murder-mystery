@@ -81,7 +81,11 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
         ...current,
         groupChatHistory: [...current.groupChatHistory, playerMessage],
       }));
-      publish(id, { type: 'group_message', message: playerMessage });
+      // KI-066: the stored message keeps the real playerId (server-side NPC labeling reads it), but the
+      // broadcast must NOT carry the seat credential — send the author's publicId instead.
+      const broadcastMessage: ChatMessage = { ...playerMessage, authorPublicId: player.publicId };
+      delete broadcastMessage.playerId;
+      publish(id, { type: 'group_message', message: broadcastMessage });
     }
 
     // 2. Stream NPC responses. Serialized per-room (C1) so two concurrent turns never interleave

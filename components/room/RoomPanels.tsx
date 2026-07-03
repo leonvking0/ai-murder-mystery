@@ -359,7 +359,8 @@ export function GroupChatPanel({
 
   const speakerName = (message: ChatMessage): string => {
     if (message.role === 'player') {
-      if (message.playerId === view.you.id) {
+      // KI-066: identify own messages by the public author id, never a real playerId (no longer projected).
+      if (message.authorPublicId === view.you.publicId) {
         return '你';
       }
       return message.characterId ? names.get(message.characterId) ?? '玩家' : '玩家';
@@ -396,7 +397,7 @@ export function GroupChatPanel({
                 </div>
               );
             }
-            const mine = message.role === 'player' && message.playerId === view.you.id;
+            const mine = message.role === 'player' && message.authorPublicId === view.you.publicId;
             return (
               <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                 <div

@@ -121,6 +121,38 @@ check('projected players[] carry no real auth ids at all', !rosterBlob.includes(
 check('projected players[] expose publicId as the render key', aliceRoster.every(p => Boolean(p.publicId)) && aliceRoster.some(p => p.publicId === 'pub-bob'));
 check('isSelf marks the requester and only the requester', aliceRoster.filter(p => p.isSelf).length === 1 && aliceRoster.find(p => p.publicId === 'pub-alice')?.isSelf === true && aliceRoster.find(p => p.publicId === 'pub-bob')?.isSelf === false);
 
+console.log('Chat messages never leak a real playerId (KI-066):');
+// Alice requests /state on a room where both Alice and Bob have spoken in group chat, plus Alice has a
+// private thread. The stored messages carry real (secret) playerIds; the projection must strip them and
+// expose only the author's publicId. (The whole-view blob legitimately contains Alice's OWN id via
+// `you.id`, so assert on the message collections specifically — mirrors the KI-034 roster test.)
+const chatRoom = {
+  ...twoPlayerRoom,
+  groupChatHistory: [
+    { id: 'gm1', role: 'player', characterId: 'other', playerId: 'AUTH-ID-BOB', content: 'bob line', timestamp: 1 },
+    { id: 'gm2', role: 'player', characterId: 'killer', playerId: 'AUTH-ID-ALICE', content: 'alice line', timestamp: 2 },
+    { id: 'gm3', role: 'gm', content: 'narration', timestamp: 3 },
+  ],
+  privateChats: {
+    'AUTH-ID-ALICE:other': [
+      { id: 'p1', role: 'player', characterId: 'other', playerId: 'AUTH-ID-ALICE', content: 'alice private', timestamp: 4 },
+    ],
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const aliceChatView = projectRoomForPlayer(chatRoom, scenario, 'AUTH-ID-ALICE')!;
+const groupBlob = JSON.stringify(aliceChatView.room.groupChatHistory);
+check('KI-066: projected group messages carry no real playerId (own or others)', !groupBlob.includes('AUTH-ID-ALICE') && !groupBlob.includes('AUTH-ID-BOB'));
+const bobMsg = aliceChatView.room.groupChatHistory.find(m => m.id === 'gm1')!;
+const aliceMsg = aliceChatView.room.groupChatHistory.find(m => m.id === 'gm2')!;
+check("KI-066: another member's group message resolves to their publicId", bobMsg.authorPublicId === 'pub-bob' && bobMsg.playerId === undefined);
+check('KI-066: own group message resolves to own publicId', aliceMsg.authorPublicId === 'pub-alice' && aliceMsg.playerId === undefined);
+const gmMsg = aliceChatView.room.groupChatHistory.find(m => m.id === 'gm3')!;
+check('KI-066: non-human (gm) message passes through untouched', gmMsg.authorPublicId === undefined && gmMsg.playerId === undefined);
+const privBlob = JSON.stringify(aliceChatView.room.yourPrivateChats);
+check('KI-066: private thread carries no real playerId', !privBlob.includes('AUTH-ID-ALICE'));
+check('KI-066: private message resolves to the author publicId', aliceChatView.room.yourPrivateChats['other']?.[0]?.authorPublicId === 'pub-alice');
+
 console.log('Seat auth tokens (KI-034):');
 const { signToken, verifyToken } = await import('../lib/room/auth.ts');
 const validToken = signToken('room-1', 'player-A');
