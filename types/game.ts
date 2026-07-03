@@ -339,6 +339,24 @@ export interface PublicPlayer {
   isSelf: boolean; // server-set: true only for the requesting (cookie-authenticated) player
 }
 
+// One scored win-condition for a character at REVEAL. Reveal-only + isolation-safe: computed purely
+// from already-revealed tally/ballots (see buildReveal), never from private script data.
+export interface ObjectiveScore {
+  kind: 'escape' | 'not_accused' | 'vote_correct' | 'secret_hidden';
+  label: string;      // human-readable Chinese, set server-side
+  achieved: boolean;
+  points: number;
+}
+
+// A per-character scorecard, one per scenario character. Reveal-only + isolation-safe.
+export interface ScoreCard {
+  characterId: string;
+  playerName: string | null;   // reuse the cast attribution (null = AI seat)
+  isKiller: boolean;
+  objectives: ObjectiveScore[];
+  total: number;               // sum of `points` for achieved objectives
+}
+
 export interface RevealInfo {
   truth: string;
   murderMethod: string;
@@ -356,6 +374,9 @@ export interface RevealInfo {
   // Faction outcome for the requesting player: the killer wins by ESCAPING (group wrong); everyone
   // else wins by catching the killer (group correct). See buildReveal for the truth table.
   outcome: 'win' | 'loss';
+  // Machine-checkable objectives scoreboard (F3). Reveal-only + isolation-safe: derived purely from the
+  // already-revealed tally/ballots/accused, never from private per-character data. One card per character.
+  scoreboard: ScoreCard[];
 }
 
 // What a single player is allowed to see.

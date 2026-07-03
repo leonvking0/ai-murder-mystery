@@ -768,7 +768,8 @@ const REVEAL_STAGE = {
   truth: 2,
   tally: 3,
   ballots: 4,
-  recap: 5,
+  scoreboard: 5,
+  recap: 6,
 } as const;
 const REVEAL_STAGE_MAX = REVEAL_STAGE.recap;
 
@@ -879,6 +880,63 @@ export function RevealRoom({ view }: { view: PlayerRoomView }) {
             </ul>
           )}
         </Section>
+      )}
+
+      {stage >= REVEAL_STAGE.scoreboard && (
+        <div className="mt-6">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">本局结算 · 积分</p>
+          <div className="mt-2 space-y-2">
+            {[...reveal.scoreboard]
+              .sort((a, b) => b.total - a.total)
+              .map(card => {
+                const isYou = view.you.assignedCharacterId === card.characterId;
+                return (
+                  <div
+                    key={card.characterId}
+                    className={[
+                      'rounded-xl border px-4 py-3',
+                      isYou
+                        ? 'border-amber-400/70 bg-amber-900/20 ring-1 ring-amber-400/60'
+                        : 'border-slate-700 bg-slate-900/60',
+                    ].join(' ')}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-amber-100">
+                        {names.get(card.characterId) ?? card.characterId}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        （{card.playerName ? `玩家：${card.playerName}` : 'AI'}）
+                      </span>
+                      {card.isKiller && (
+                        <span className="rounded-full border border-rose-500/50 bg-rose-900/20 px-2 py-0.5 text-xs text-rose-200">
+                          真凶
+                        </span>
+                      )}
+                      {isYou && (
+                        <span className="rounded-full border border-amber-400/60 bg-amber-800/30 px-2 py-0.5 text-xs text-amber-100">
+                          你
+                        </span>
+                      )}
+                      <span className="ml-auto text-sm font-semibold text-amber-200">{card.total} 分</span>
+                    </div>
+                    <ul className="mt-2 space-y-1">
+                      {card.objectives.map(objective => (
+                        <li key={objective.kind} className="flex items-center gap-2 text-sm">
+                          <span className={objective.achieved ? 'text-emerald-300' : 'text-slate-500'}>
+                            {objective.achieved ? '✓' : '✗'}
+                          </span>
+                          <span className={objective.achieved ? 'text-slate-100' : 'text-slate-400'}>
+                            {objective.label}
+                          </span>
+                          <span className="ml-auto text-xs text-slate-400">+{objective.points}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
       )}
 
       {/* Per-character script recap — reveal.characters carries full private data and is ONLY present at

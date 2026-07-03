@@ -15,12 +15,14 @@ import type {
   ChatMessage,
   Clue,
   ClueView,
+  ObjectiveScore,
   Player,
   PlayerRoomView,
   PublicPlayer,
   Room,
   Scenario,
   ScenarioPublic,
+  ScoreCard,
 } from '@/types/game';
 
 // Strip GM-only fields (significance, round gating) from a clue before sending to a client (KI-006).
@@ -379,6 +381,35 @@ function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRo
 
   const groupCorrect = accusedCharacterId !== null && accusedCharacterId === killer?.id;
 
+  // ---- F3: machine-checkable objectives scoreboard ----
+  // Computed generically from the already-revealed results only (killer, tally, ballots, accused,
+  // groupCorrect, cast). Reads NO private per-character data, so it is isolation-safe and works for every
+  // scenario with zero content authoring. One ScoreCard per character, in scenario cast order.
+  const votesByCharacter = new Map(tally.map(entry => [entry.characterId, entry.votes]));
+  const ballotByVoter = new Map(ballots.map(ballot => [ballot.voterCharacterId, ballot.accusedCharacterId]));
+  const playerNameByCharacter = new Map(cast.map(entry => [entry.characterId, entry.playerName]));
+
+  const scoreboard: ScoreCard[] = scenario.characters.map(character => {
+    const objectives: ObjectiveScore[] = character.isKiller
+      ? [
+          // The killer scores by ESCAPING (never票出). No not_accused/vote_correct for the killer.
+          { kind: 'escape', label: '逃脱指认（凶手未被票出）', achieved: !groupCorrect, points: 2 },
+        ]
+      : [
+          { kind: 'not_accused', label: '未被集体指认', achieved: accusedCharacterId !== character.id, points: 1 },
+          { kind: 'secret_hidden', label: '无人怀疑（零票）', achieved: (votesByCharacter.get(character.id) ?? 0) === 0, points: 1 },
+          { kind: 'vote_correct', label: '指认真凶', achieved: ballotByVoter.get(character.id) === killer?.id, points: 1 },
+        ];
+    const total = objectives.reduce((sum, objective) => (objective.achieved ? sum + objective.points : sum), 0);
+    return {
+      characterId: character.id,
+      playerName: playerNameByCharacter.get(character.id) ?? null,
+      isKiller: character.isKiller,
+      objectives,
+      total,
+    };
+  });
+
   // Which character did the requesting player play, and were they the killer?
   const youCharacterId = room.players.find(player => player.id === playerId)?.assignedCharacterId;
   const youWereKiller = Boolean(killer && youCharacterId && youCharacterId === killer.id);
@@ -402,5 +433,6 @@ function buildReveal(room: Room, scenario: Scenario, playerId: string): PlayerRo
     groupCorrect,
     youWereKiller,
     outcome,
+    scoreboard,
   };
 }
