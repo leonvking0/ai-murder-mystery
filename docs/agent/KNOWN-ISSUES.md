@@ -527,6 +527,17 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   unsolvable red herrings (relatives of KI-031); over-signposted difficulty — round-1 clues alone pin the
   killer, `estimatedDuration` overstated (`:9`).
 
+### KI-066 · Chat messages leaked the author's real `playerId` (the seat credential) to every client · security/critical · ✅ fixed (PR #30 / found during F5 pre-flight)
+- **Where:** `group-chat/route.ts` stored `playerId: player.id` on the group `ChatMessage`; `projection.ts`
+  shipped `groupChatHistory` verbatim and the `group_message` SSE event broadcast the full message → every
+  member received every other member's real (secret) `playerId`. This is a missed spot in the KI-034 fix
+  (whose whole point is that a real player id must never reach another client — it is forgeable into a valid
+  seat cookie when `ROOM_AUTH_SECRET` is weak/unset).
+- **Fix:** `ChatMessage.authorPublicId` + `toPublicMessage(message, publicIdByPlayerId)` sanitizer (strip
+  `playerId`, attach the author's `publicId`), applied to `groupChatHistory` + every private thread in the
+  projection and to the one player-authored broadcast; the STORED message keeps `playerId` for server-only NPC
+  labeling. Client mine-detection now uses `authorPublicId === you.publicId`. +6 `info-isolation` regressions.
+
 ### Verified NOT bugs (refuted on adversarial check — don't re-file)
 - vote route's phase check being "outside the transaction" is **not** exploitable: after REVEAL the room
   is `finished`, `advanceRoom` can't re-run, and `buildReveal` reads the vote snapshot — a late vote

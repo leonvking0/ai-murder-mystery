@@ -260,3 +260,35 @@ track which secrets actually surfaced. If a scenario ever wants bespoke per-char
 optional annotated path on top; the generic default must remain so unauthored scenarios still score. If a
 killer *faction* (>1 killer) is ever added, the escape/`groupCorrect` logic must change together with the
 exactly-one-killer validation invariant (see the LLM/validation ADR) and the win/loss `outcome` table.
+
+## 2026-07-03 — A chat message's real playerId never leaves the server; clients render via authorPublicId — Accepted
+**Context (KI-066):** `playerId` is the seat auth credential (KI-034: never project a real player id). But
+group-chat stored `playerId` on the `ChatMessage`, and it reached clients two ways — `groupChatHistory`
+projected verbatim + the `group_message` SSE broadcast — re-leaking the credential to every member.
+**Decision:** Keep `playerId` on the STORED message (server-only; `room-group-chat` labeling reads it), but
+strip it at every client boundary. Added `ChatMessage.authorPublicId` + `toPublicMessage(message,
+publicIdByPlayerId)` in `projection.ts` (drops `playerId`, attaches the author's non-secret `publicId`), applied
+to `groupChatHistory` and every private thread in `projectRoomForPlayer`, and to the single player-authored
+broadcast (`group_message`) in the group-chat route. Clients detect their own messages via
+`authorPublicId === you.publicId`, never the real id.
+**Consequences:** ANY new code path that puts a player-authored `ChatMessage` on the bus or in a projection MUST
+route it through `toPublicMessage` (or omit `playerId`). The rule "no real playerId on a message leaving the
+server" is now regression-tested (info-isolation, group + private). Server-side reads of `message.playerId` are
+fine — they run before projection.
+
+## 2026-07-03 — Human↔human private chat is a projection-merged pair of directed threads — Accepted
+**Context (F5):** Private threads are keyed `${senderPlayerId}:${targetCharacterId}`. For NPC targets the LLM
+replies into the same thread. Human targets were blocked (400). A naive fix (two separate half-threads, A→X and
+B→Y) reads as two disjoint conversations.
+**Decision:** Store each direction in the SENDER's own thread (no shared thread, no LLM for human targets) and
+emit a signal-only `room_state` event (private content never touches the room-wide bus). The PROJECTION
+assembles the conversation: for the requesting player it merges, per counterpart character, their OUTGOING
+thread (`me:character`) with INCOMING threads where another human messaged the character THEY play
+(`otherPlayer:myCharacter`), sorted by timestamp. Isolation falls out of the key math: a player only ever reads
+`me:*` (theirs) and `*:myCharacter` (addressed to them) — never a third party's thread — and every message is
+sanitized via `toPublicMessage` (KI-066) so a counterpart's credential never leaks.
+**Consequences:** A human↔human conversation is physically two directed threads unified only at projection time;
+any future feature that reads `room.privateChats` directly (not through the projection) must apply the same
+`me:* ∪ *:myCharacter` visibility rule + sanitization. A seat taken over by an NPC (D2) is treated as an AI
+target by the route (`characterControl.kind==='npc'`) and the UI (`controlledByNpc`), so a disconnected human's
+seat correctly falls back to LLM replies.
