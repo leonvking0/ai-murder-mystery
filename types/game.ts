@@ -192,8 +192,15 @@ export interface ChatMessage {
   id: string;
   role: 'player' | 'npc' | 'gm' | 'system';
   characterId?: string;
-  // In multiplayer, a 'player' message is authored by a human; this is their player id.
+  // In multiplayer, a 'player' message is authored by a human; this is their real (secret) player id.
+  // SERVER-ONLY: `playerId` is the seat auth credential (KI-034) and MUST be stripped before a message is
+  // projected to /state or broadcast over the room bus — a stored group/private message that kept it
+  // leaked the credential to every other member (KI-066). Use `authorPublicId` for client rendering.
   playerId?: string;
+  // Non-secret public render id of the human author, set by the projection/broadcast sanitizer
+  // (`toPublicMessage`). Safe to expose. Clients detect their own messages via
+  // `authorPublicId === you.publicId`, never via the real `playerId`.
+  authorPublicId?: string;
   content: string;
   timestamp: number;
 }

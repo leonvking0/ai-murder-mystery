@@ -25,6 +25,19 @@ import type {
   ScoreCard,
 } from '@/types/game';
 
+// Sanitize a chat message for a client (KI-066): the real (secret) authoring `playerId` is the seat
+// credential and must never leave the server on a message. Strip it and, for a human-authored message,
+// attach the author's non-secret `publicId` instead (clients detect their own messages via
+// `authorPublicId === you.publicId`). Non-human messages (npc/gm/system) carry no playerId and pass through.
+export function toPublicMessage(message: ChatMessage, publicIdByPlayerId: Map<string, string>): ChatMessage {
+  if (message.playerId === undefined) {
+    return message;
+  }
+  const sanitized: ChatMessage = { ...message, authorPublicId: publicIdByPlayerId.get(message.playerId) };
+  delete sanitized.playerId;
+  return sanitized;
+}
+
 // Strip GM-only fields (significance, round gating) from a clue before sending to a client (KI-006).
 export function toClueView(clue: Clue): ClueView {
   return {
@@ -128,12 +141,17 @@ export function projectRoomForPlayer(
 
   const isReveal = room.currentPhase === 'REVEAL';
 
-  // Only the requesting player's own private threads.
+  // Map every member's real playerId → their non-secret publicId, so messages can be sanitized before
+  // they leave the server (KI-066): a chat message's real `playerId` is the seat credential and must
+  // never reach another client.
+  const publicIdByPlayerId = new Map(room.players.map(player => [player.id, player.publicId]));
+
+  // Only the requesting player's own private threads. Messages are sanitized (playerId → publicId).
   const yourPrivateChats: Record<string, ChatMessage[]> = {};
   for (const [key, messages] of Object.entries(room.privateChats)) {
     const [ownerId, characterId] = key.split(':');
     if (ownerId === playerId && characterId) {
-      yourPrivateChats[characterId] = messages;
+      yourPrivateChats[characterId] = messages.map(message => toPublicMessage(message, publicIdByPlayerId));
     }
   }
 
@@ -149,7 +167,9 @@ export function projectRoomForPlayer(
       players: room.players.map(player => toPublicPlayer(player, playerId, room.characterControl)),
       publicClues: room.publicClues.map(toClueView),
       yourClues: (room.discoveredClues[playerId] ?? []).map(toClueView),
-      groupChatHistory: room.groupChatHistory,
+      // KI-066: sanitize every group message so a human speaker's real playerId (the seat credential)
+      // is replaced with their publicId before it reaches any client.
+      groupChatHistory: room.groupChatHistory.map(message => toPublicMessage(message, publicIdByPlayerId)),
       yourPrivateChats,
       voteCount: Object.keys(room.votes).length,
       youVotedFor: room.votes[playerId],
