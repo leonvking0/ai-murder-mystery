@@ -2,6 +2,37 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-03 (later) — Batch F continued: KI-066 security fix + F5 human private chat MERGED
+
+**State:** Green on `main` @ `70d4091`. `npm test` = **279 checks** (info-isolation 112→**123**: +6 KI-066,
++5 F5; gameplay-chat 51 + gameplay-reveal 98 + scenario-validation 7), tsc/eslint clean, Turbopack build ✓.
+
+**What landed (2 PRs #30–#31, implemented directly by the orchestrator — security-critical + isolation-dense,
+so kept in one head rather than delegated):**
+- **PR #30 (KI-066, critical security)** — found during F5 pre-flight: group-chat stored the human speaker's
+  real `playerId` (the KI-034 seat credential) on the `ChatMessage`, and it reached every client via
+  `groupChatHistory` (projected verbatim) + the `group_message` SSE broadcast (forgeable into a seat cookie
+  when `ROOM_AUTH_SECRET` is weak/unset). Fix: `ChatMessage.authorPublicId` + `toPublicMessage` sanitizer
+  (strip playerId → attach publicId) applied to groupChatHistory + private threads in the projection and to the
+  one player-authored broadcast; stored message keeps playerId for server-only NPC labeling; client
+  mine-detection → `authorPublicId === you.publicId`. +6 regressions.
+- **PR #31 (F5, human↔human private chat)** — a human-controlled private-chat target no longer 400s: message
+  stored in the sender's isolated thread + signal-only `room_state` event (no private content on the bus); the
+  projection merges, per counterpart character, OUTGOING (`me:character`) with INCOMING
+  (`otherPlayer:myCharacter`) threads into one time-sorted conversation; every message sanitized via KI-066.
+  `PrivateChatPanel` lists all non-self characters (真人/AI tag), typing hint only for AI, mine via
+  authorPublicId. +5 regressions (merge/order, sanitize, symmetric view, third-party non-leak).
+
+**Isolation invariant (re-audited):** a player's projected private view contains ONLY `me:*` (theirs) and
+`*:myCharacter` (addressed to them); a third party's thread never surfaces; no real playerId leaves the server
+on ANY message (group or private) post-KI-066. Two new ADRs in DECISIONS (message sanitizer; merged private thread).
+
+**Remaining in Batch F:** F4 (flow data-ization — `Room.phaseSequence` + `flow:'quick'|'standard'`, digests
+KI-032/057; M/L, touches the phase engine — do as its own wave), F2 tail (random-killer → LLM-gen w/ auto-solve
+regression → scenario matrix → UGC import).
+
+---
+
 ## Snapshot — 2026-07-03 — Backlog Batch F (content & reach) PARTIAL: F1 + F2-picker + F3 MERGED
 
 **State:** Green on `main` @ `e63b158`. `npm test` = **268 checks** (info-isolation 112 + gameplay-chat 51 +

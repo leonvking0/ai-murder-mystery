@@ -11,13 +11,12 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3 landed.
-> A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**; **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**
-> (same multi-agent orchestration: opus-4.8 workers in git worktrees, orchestrator audit + squash-merge; F1+F2
-> ran as a file-disjoint parallel wave, F3 followed once F2's `types/game.ts` merged). Test suite 22 → 90 → 156 →
-> 261 → **268 checks** (F1/F2/F3 added no new test files; content + additive projection/UI only).
-> tsc/eslint/Turbopack build green. **Remaining in F: F4 (flow data-ization, M/L), F5 (human↔human private
-> chat, M), and F2 advanced (random-killer variants, LLM-gen, UGC — the "L total" tail).**
+> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3, **F5** landed,
+> plus a security fix (**KI-066**) found during F5 pre-flight. A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**;
+> **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**; **KI-066 via #30**; **F5 via #31**. Test suite 22 → 90 →
+> 156 → 261 → 268 → **279 checks** (info-isolation 112→123: +6 KI-066, +5 F5). tsc/eslint/Turbopack build green.
+> **Remaining in F: F4 (flow data-ization, M/L — own wave, touches the phase engine) and F2 advanced
+> (random-killer variants, LLM-gen, UGC — the "L total" tail).**
 > Deferred follow-ups still open: first-come-exclusive private clues (part of C8); signed reconnect cookie to
 > rebind a seat (part of C5/D2); the compaction read-modify-write vs a concurrent `present-clue` is a narrow,
 > self-healing race (accepted). (KI-059 provider/key mismatch was closed in Batch E / PR #23; the genuinely
@@ -171,8 +170,14 @@
   `RoomPanels.tsx`. — **M**
 - [ ] **F4 · Flow data-ization (digest KI-032)** — `Room.phaseSequence` + `flow: 'quick'|'standard'`;
   per-phase suggested durations / optional auto-advance (also enables async play + no host-offline stall). — **M/L**
-- [ ] **F5 · Human↔human private chat** — key structure already supports it; add "target is you" thread to
-  the projection + a signal-only event. **Files:** `private-chat/route.ts`, `projection.ts`. — **M**
+- [x] **F5 · Human↔human private chat** ✅ PR #31 — a human-controlled target no longer 400s: the message is
+  stored in the sender's isolated thread + a **signal-only** `room_state` event fires (no private content on the
+  bus); the projection merges, per counterpart character, OUTGOING (`me:character`) with INCOMING
+  (`otherPlayer:myCharacter`) threads into one time-sorted conversation; every message sanitized via KI-066's
+  `toPublicMessage` (no counterpart credential leak); `PrivateChatPanel` lists all non-self characters (真人/AI
+  tag). **Files:** `private-chat/route.ts`, `projection.ts`, `RoomPanels.tsx`, `info-isolation.test.ts`. — **M**
+  - Prereq found + fixed en route: **KI-066** (group/private messages leaked the author's real `playerId` — the
+    KI-034 seat credential — to every client via `groupChatHistory`/the `group_message` broadcast). ✅ PR #30.
 
 ---
 
