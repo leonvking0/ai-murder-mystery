@@ -5,6 +5,10 @@ import { randomUUID } from 'node:crypto';
 
 import type { ChatMessage, Clue, GamePhase, Room, Scenario } from '@/types/game';
 
+// Relative + explicit `.ts` so the strip-types test runner resolves this value import at runtime
+// (`@/` aliases resolve only for type-only imports there). See tests/gameplay-reveal.test.ts.
+import { FLOWS } from './flow.ts';
+
 // C8 / KI-042: how many independent searches a single player may run within one investigation phase.
 // One investigateRoom() call = one unit, regardless of how many clues that search turned up. The budget
 // is tracked per (playerId, phase) in room.investigationCounts and resets naturally each phase (the key
@@ -12,14 +16,31 @@ import type { ChatMessage, Clue, GamePhase, Room, Scenario } from '@/types/game'
 // whole search back when the budget is exhausted.
 export const INVESTIGATION_BUDGET = 2;
 
-function investigationRound(phase: GamePhase): number | null {
-  if (phase === 'INVESTIGATION_1') {
-    return 1;
+// F4-b: flow- + scenario-aware investigation ceiling. Replaces the old fixed INVESTIGATION_1→1 /
+// INVESTIGATION_2→2 map so a room can carry a shorter `phaseSequence` (the 'quick' flow) without
+// stranding round-2 clues. Rule: the LAST investigation phase in the room's flow exposes EVERY clue
+// round the scenario authored; earlier investigation phases expose only their ordinal.
+//
+// Standard flow (investigation phases = [INVESTIGATION_1, INVESTIGATION_2]) is unchanged:
+//   INVESTIGATION_1 → idx 0, not last → 1.  INVESTIGATION_2 → idx 1, last → max(clueMax=2, 2) = 2.
+// Quick flow (investigation phases = [INVESTIGATION_1]):
+//   INVESTIGATION_1 → idx 0, last → max(clueMax=2, 1) = 2, so all clues stay reachable.
+function investigationCeiling(room: Room, scenario: Scenario): number | null {
+  const seq = room.phaseSequence ?? FLOWS.standard;
+  const invPhases: GamePhase[] = seq.filter(p => p === 'INVESTIGATION_1' || p === 'INVESTIGATION_2');
+  const idx = invPhases.indexOf(room.currentPhase);
+  if (idx === -1) {
+    return null; // current phase is not an investigation phase
   }
-  if (phase === 'INVESTIGATION_2') {
-    return 2;
+  const ordinal = idx + 1;
+  const isLast = idx === invPhases.length - 1;
+  if (!isLast) {
+    return ordinal;
   }
-  return null;
+  // Last investigation phase: expose every clue round the scenario authored (never strand a clue).
+  return scenario.locations
+    .flatMap(l => l.clues.map(c => c.availableInRound))
+    .reduce((m, r) => Math.max(m, r), ordinal);
 }
 
 // D6: a clue is gated behind an optional `prerequisite` clue id. It becomes offerable only once that
@@ -51,7 +72,7 @@ export function investigateRoom(
     throw new Error(`Location not found: ${locationId}`);
   }
 
-  const round = investigationRound(room.currentPhase);
+  const round = investigationCeiling(room, scenario);
   if (!round) {
     throw new Error(`Investigation is not allowed during phase ${room.currentPhase}`);
   }

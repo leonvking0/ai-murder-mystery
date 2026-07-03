@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 // imports there; see tests/info-isolation.test.ts). Value imports here MUST stay relative so this module
 // remains loadable offline — do NOT value-import room-engine.ts (its @/-value chain would break tests).
 import { INVESTIGATION_BUDGET } from '../game-engine/room-investigation.ts';
+import { FLOWS } from '../game-engine/flow.ts';
 import type {
   Character,
   CharacterPublic,
@@ -187,6 +188,9 @@ export function projectRoomForPlayer(
       status: room.status,
       currentPhase: room.currentPhase,
       round: room.round,
+      // F4-b: public game structure (which phases, in what order) so the client renders the right
+      // number of progress steps for quick vs standard. NOT a secret. Defaults to the standard walk.
+      phaseSequence: room.phaseSequence ?? FLOWS.standard,
       // Publish the host's non-secret render id, never their real `hostPlayerId` (KI-034 leak fix).
       hostPublicId: room.players.find(player => player.id === room.hostPlayerId)?.publicId ?? '',
       players: room.players.map(player => toPublicPlayer(player, playerId, room.characterControl)),

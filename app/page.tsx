@@ -6,7 +6,11 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { setPlayerId } from '@/lib/room/identity';
+import { FLOW_LABELS } from '@/lib/game-engine/flow';
+import type { FlowId } from '@/lib/game-engine/flow';
 import type { ScenarioCard } from '@/types/game';
+
+const FLOW_IDS: FlowId[] = ['standard', 'quick'];
 
 const DIFFICULTY_LABELS: Record<ScenarioCard['difficulty'], string> = {
   easy: '入门',
@@ -22,6 +26,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioCard[]>([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const [selectedFlowId, setSelectedFlowId] = useState<FlowId>('standard');
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +56,7 @@ export default function HomePage() {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName }),
+        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName, flowId: selectedFlowId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -130,6 +135,32 @@ export default function HomePage() {
                   );
                 })
               )}
+            </div>
+          </section>
+
+          <section>
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">游戏节奏</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {FLOW_IDS.map(flowId => {
+                const selected = flowId === selectedFlowId;
+                const label = FLOW_LABELS[flowId];
+                return (
+                  <button
+                    key={flowId}
+                    type="button"
+                    onClick={() => setSelectedFlowId(flowId)}
+                    aria-pressed={selected}
+                    className={`w-full rounded-xl border p-4 text-left transition ${
+                      selected
+                        ? 'border-amber-500/80 bg-amber-950/30 ring-1 ring-amber-500/40'
+                        : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
+                    }`}
+                  >
+                    <h2 className="text-base font-semibold text-amber-100">{label.title}</h2>
+                    <p className="mt-1.5 text-xs leading-relaxed text-slate-300">{label.description}</p>
+                  </button>
+                );
+              })}
             </div>
           </section>
 

@@ -397,6 +397,9 @@ export interface PlayerRoomView {
     status: RoomStatus;
     currentPhase: GamePhase;
     round: number;
+    // F4-b: the room's ordered phase walk (public game structure — which phases, in what order — NOT a
+    // secret). Lets the client render the right number of steps for quick vs standard flows.
+    phaseSequence: GamePhase[];
     // Non-secret render id of the host (KI-034): shipping the host's real `hostPlayerId` here leaked a
     // seat auth credential to every member. Clients identify the host via `you.isHost` / `player.isHost`.
     hostPublicId: string;
