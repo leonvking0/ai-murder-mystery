@@ -153,6 +153,48 @@ const privBlob = JSON.stringify(aliceChatView.room.yourPrivateChats);
 check('KI-066: private thread carries no real playerId', !privBlob.includes('AUTH-ID-ALICE'));
 check('KI-066: private message resolves to the author publicId', aliceChatView.room.yourPrivateChats['other']?.[0]?.authorPublicId === 'pub-alice');
 
+console.log('Human↔human private chat merge + isolation (F5):');
+// Alice (char 'killer') and Bob (char 'other') privately message each other. Each direction is stored in
+// the sender's own thread; the projection must merge both into one conversation keyed by the COUNTERPART
+// character, sorted by time, with counterpart messages sanitized (no real playerId).
+const f5Room = {
+  ...twoPlayerRoom,
+  privateChats: {
+    'AUTH-ID-ALICE:other': [
+      { id: 'a1', role: 'player', characterId: 'other', playerId: 'AUTH-ID-ALICE', content: 'ALICE-TO-BOB', timestamp: 2 },
+    ],
+    'AUTH-ID-BOB:killer': [
+      { id: 'b1', role: 'player', characterId: 'killer', playerId: 'AUTH-ID-BOB', content: 'BOB-TO-ALICE', timestamp: 1 },
+    ],
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const aliceF5 = projectRoomForPlayer(f5Room, scenario, 'AUTH-ID-ALICE')!;
+const aliceThread = aliceF5.room.yourPrivateChats['other'] ?? [];
+check('F5: outgoing + incoming merge into one conversation, sorted by time',
+  aliceThread.length === 2 && aliceThread[0].content === 'BOB-TO-ALICE' && aliceThread[1].content === 'ALICE-TO-BOB');
+check('F5: incoming human message is sanitized (publicId author, no real playerId)',
+  aliceThread.find(m => m.content === 'BOB-TO-ALICE')?.authorPublicId === 'pub-bob' && !JSON.stringify(aliceThread).includes('AUTH-ID-BOB'));
+check('F5: own message in the merged thread carries own publicId',
+  aliceThread.find(m => m.content === 'ALICE-TO-BOB')?.authorPublicId === 'pub-alice');
+const bobThread = projectRoomForPlayer(f5Room, scenario, 'AUTH-ID-BOB')!.room.yourPrivateChats['killer'] ?? [];
+check('F5: the counterpart sees the same conversation (no real playerId either)',
+  bobThread.length === 2 && !JSON.stringify(bobThread).includes('AUTH-ID-ALICE'));
+// A third party's private thread to Bob's character must never surface to the unrelated Alice.
+const f5GhostRoom = {
+  ...f5Room,
+  privateChats: {
+    ...f5Room.privateChats,
+    'GHOST-PLAYER:other': [
+      { id: 'g1', role: 'player', characterId: 'other', playerId: 'GHOST-PLAYER', content: 'THIRD-PARTY-SECRET', timestamp: 5 },
+    ],
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const aliceGhost = projectRoomForPlayer(f5GhostRoom, scenario, 'AUTH-ID-ALICE')!;
+check("F5: a third party's private thread never surfaces to an unrelated player",
+  !JSON.stringify(aliceGhost.room.yourPrivateChats).includes('THIRD-PARTY-SECRET'));
+
 console.log('Seat auth tokens (KI-034):');
 const { signToken, verifyToken } = await import('../lib/room/auth.ts');
 const validToken = signToken('room-1', 'player-A');

@@ -465,13 +465,26 @@ export function PrivateChatPanel({
   onSend: (characterId: string, message: string) => Promise<void>;
 }) {
   const names = useMemo(() => nameMapOf(view), [view]);
-  const humans = useMemo(() => humanCharacterIds(view), [view]);
-  const npcCharacters = useMemo(
-    () => view.scenario.characters.filter(character => !humans.has(character.id)),
-    [humans, view.scenario.characters],
+  // F5: which characters are currently human-controlled (a disconnected seat taken over by an NPC is NOT
+  // human — matches the route, which delivers to an LLM for a taken-over seat). Drives the 真人/AI tag
+  // and whether to show a "回复中" indicator (only NPCs auto-reply).
+  const humanControlled = useMemo(
+    () =>
+      new Set(
+        view.room.players
+          .filter(player => player.assignedCharacterId && !player.controlledByNpc)
+          .map(player => player.assignedCharacterId as string),
+      ),
+    [view.room.players],
+  );
+  // F5: private-chat targets = every character except my own seat (NPCs AND other humans).
+  const targets = useMemo(
+    () => view.scenario.characters.filter(character => character.id !== view.you.assignedCharacterId),
+    [view.scenario.characters, view.you.assignedCharacterId],
   );
 
-  const [targetId, setTargetId] = useState<string | null>(npcCharacters[0]?.id ?? null);
+  const [targetId, setTargetId] = useState<string | null>(targets[0]?.id ?? null);
+  const targetIsHuman = targetId ? humanControlled.has(targetId) : false;
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -506,10 +519,10 @@ export function PrivateChatPanel({
     return () => viewport.removeEventListener('scroll', handleScroll);
   }, []);
 
-  if (npcCharacters.length === 0) {
+  if (targets.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 text-sm text-slate-400">
-        本局所有角色都由真人扮演，请在公共讨论区交流。
+        本局只有你一个角色，暂无可私聊的对象。
       </div>
     );
   }
@@ -532,9 +545,9 @@ export function PrivateChatPanel({
   return (
     <div className="flex h-full min-h-[420px] flex-col rounded-2xl border border-slate-700/70 bg-slate-950/70 backdrop-blur">
       <div className="border-b border-slate-700/60 px-4 py-3">
-        <p className="text-sm font-semibold text-amber-100">私聊 AI 角色</p>
+        <p className="text-sm font-semibold text-amber-100">私聊</p>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {npcCharacters.map(character => (
+          {targets.map(character => (
             <button
               key={character.id}
               type="button"
@@ -547,15 +560,25 @@ export function PrivateChatPanel({
               ].join(' ')}
             >
               {character.name}
+              <span className="ml-1 text-[10px] text-slate-400">
+                {humanControlled.has(character.id) ? '真人' : 'AI'}
+              </span>
             </button>
           ))}
         </div>
+        <p className="mt-2 text-xs text-slate-400">
+          {targetIsHuman
+            ? '对方是真人玩家，消息只有你俩可见；对方不会自动回复。'
+            : '与 AI 角色一对一私聊，仅你可见。'}
+        </p>
       </div>
 
       <ScrollArea className="h-0 flex-1 px-4 py-3">
         <div ref={scrollRef} className="space-y-3 pr-2">
           {thread.map(message => {
-            const mine = message.role === 'player';
+            // F5/KI-066: both my outgoing and a human counterpart's incoming messages have role 'player';
+            // distinguish by the public author id (own messages carry my publicId, never a real playerId).
+            const mine = message.role === 'player' && message.authorPublicId === view.you.publicId;
             return (
               <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                 <div
@@ -574,7 +597,7 @@ export function PrivateChatPanel({
               </div>
             );
           })}
-          {sending && <p className="text-xs text-slate-400">对方正在回复...</p>}
+          {sending && !targetIsHuman && <p className="text-xs text-slate-400">对方正在回复...</p>}
           <div ref={endRef} />
         </div>
       </ScrollArea>
