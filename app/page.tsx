@@ -1,11 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { setPlayerId } from '@/lib/room/identity';
+import type { ScenarioCard } from '@/types/game';
+
+const DIFFICULTY_LABELS: Record<ScenarioCard['difficulty'], string> = {
+  easy: '入门',
+  medium: '进阶',
+  hard: '烧脑',
+};
 
 export default function HomePage() {
   const router = useRouter();
@@ -13,6 +20,29 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<ScenarioCard[]>([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/scenarios');
+        const data = await res.json();
+        if (cancelled || !res.ok) {
+          return;
+        }
+        const cards: ScenarioCard[] = data.scenarios ?? [];
+        setScenarios(cards);
+        setSelectedScenarioId(prev => prev ?? cards[0]?.id ?? null);
+      } catch {
+        // Non-fatal: createRoom falls back to 'storm-mansion' if the catalog never loads.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const createRoom = async () => {
     setCreating(true);
@@ -21,7 +51,7 @@ export default function HomePage() {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scenarioId: 'storm-mansion', hostName }),
+        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -46,13 +76,63 @@ export default function HomePage() {
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_12%_14%,rgba(180,83,9,0.24),transparent_42%),radial-gradient(circle_at_84%_78%,rgba(30,41,59,0.4),transparent_48%),linear-gradient(135deg,#020617,#111827_42%,#0f172a)] px-5 py-12 text-slate-100">
       <div className="relative z-10 w-full max-w-xl rounded-2xl border border-slate-700/80 bg-slate-950/75 p-8 backdrop-blur">
         <p className="text-xs uppercase tracking-[0.3em] text-amber-300/80">AI 剧本杀 · 多人</p>
-        <h1 className="mt-2 text-3xl font-semibold text-amber-100">暴风雪山庄</h1>
+        <h1 className="mt-2 text-3xl font-semibold text-amber-100">选择剧本</h1>
         <p className="mt-3 text-sm leading-relaxed text-slate-300">
-          暴风雪封山，五位宾客困于深山别墅，庄主死于反锁书房。和朋友开一间房，各自扮演一名嫌疑人，
-          其余角色由 AI 出演——讨论、搜证、私聊、指认真凶。
+          和朋友开一间房，各自扮演一名嫌疑人，其余角色由 AI 出演——讨论、搜证、私聊、指认真凶。
         </p>
 
         <div className="mt-8 space-y-6">
+          <section>
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">剧本</p>
+            <div className="mt-3 space-y-3">
+              {scenarios.length === 0 ? (
+                <p className="text-sm text-slate-500">加载剧本中…</p>
+              ) : (
+                scenarios.map(scenario => {
+                  const selected = scenario.id === selectedScenarioId;
+                  return (
+                    <button
+                      key={scenario.id}
+                      type="button"
+                      onClick={() => setSelectedScenarioId(scenario.id)}
+                      aria-pressed={selected}
+                      className={`w-full rounded-xl border p-4 text-left transition ${
+                        selected
+                          ? 'border-amber-500/80 bg-amber-950/30 ring-1 ring-amber-500/40'
+                          : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h2 className="text-lg font-semibold text-amber-100">{scenario.title}</h2>
+                        <span
+                          className={`mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                            selected
+                              ? 'border-amber-500/60 text-amber-200'
+                              : 'border-slate-600 text-slate-400'
+                          }`}
+                        >
+                          {DIFFICULTY_LABELS[scenario.difficulty] ?? scenario.difficulty}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-300">{scenario.description}</p>
+                      {scenario.atmosphere && (
+                        <p className="mt-1 text-xs italic text-slate-400">{scenario.atmosphere}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <span>
+                          {scenario.playerCount.min === scenario.playerCount.max
+                            ? `${scenario.playerCount.min} 人`
+                            : `${scenario.playerCount.min}–${scenario.playerCount.max} 人`}
+                        </span>
+                        <span>约 {scenario.estimatedDuration} 分钟</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
           <section>
             <p className="text-xs uppercase tracking-[0.22em] text-slate-400">创建房间</p>
             <div className="mt-2 flex gap-2">
