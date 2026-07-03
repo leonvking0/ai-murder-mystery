@@ -25,9 +25,11 @@ by the room system, which fixed most findings at the root. Detailed per-item sta
   bricked" gap + a latent `hostPlayerId` leak), NPC cross-talk, a VOTING defense round + per-ballot reveal,
   investigation prerequisite chains, and the always-on case/script drawer.
 - **⬜ Still open (carried forward):** KI-023 (**no rate limit / auth beyond seat cookie — still important before
-  public hosting**; note Batch E added per-IP limits on `join` + `resolve`), KI-030/KI-031 (content bugs → Batch F1),
-  KI-032/KI-057 (phase engine ignores `scenario.phases`; hardcoded flavor → Batch F4). *(KI-009/011/013/015/016/028/
-  033/052/053/054/055/056/059/060/062 were fixed in Batches B–E; KI-027 addressed by KI-044/059.)*
+  public hosting**; note Batch E added per-IP limits on `join` + `resolve`),
+  KI-032/KI-057 (phase engine ignores `scenario.phases`; hardcoded flavor → **Batch F4, still open**).
+  *(KI-009/011/013/015/016/028/033/052/053/054/055/056/059/060/062 fixed in Batches B–E; KI-030/031/050/051 +
+  content-lows fixed in Batch F1/PR #27; F3/PR #28 added the REVEAL objectives scoreboard; KI-027 addressed by
+  KI-044/059.)*
 
 New follow-ups worth filing: human↔human private chat, NPC voting, reconnect hardening (signed cookie),
 prompt-caching for cost, per-phase min-participation gates. See `design/multiplayer-rooms.md` "deferred".
@@ -260,7 +262,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   leaving a half-updated session.
 - **Fix:** `export const maxDuration = 60;` (Node runtime) on the streaming routes; budget NPC count.
 
-### KI-030 · Content bug: poison source is internally inconsistent · content/low · open
+### KI-030 · Content bug: poison source is internally inconsistent · content/low · ✅ fixed (PR #27 / F1)
 - **Where:** `data/scenarios/storm-mansion.json:414` — `kitchen-clue-02` says the取走的药 is
   地高辛/digoxin (a manufactured drug), but the canonical method everywhere else is a **hand-extracted
   foxglove (洋地黄) cardiac glycoside** (`case.truth:28`, timeline:617, `kitchen-clue-01`, garden clues).
@@ -268,7 +270,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Make the领用本 clue reference foxglove extract / digitalis consistently, or reconcile the
   truth to a digoxin theft.
 
-### KI-031 · Content bug: clock-skew clue is unsolvable (no owner) · content/low · open
+### KI-031 · Content bug: clock-skew clue is unsolvable (no owner) · content/low · ✅ fixed (PR #27 / F1)
 - **Where:** `data/scenarios/storm-mansion.json:386` — `living-clue-03` asserts the主钟 was set back 12
   minutes by someone, but no character's timeline/script accounts for doing it.
 - **Impact:** A red herring the player can never resolve into the answer.
@@ -462,7 +464,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Send `expectedPhase`; mutator returns null/409 if `current.currentPhase !== expectedPhase`;
   `doAdvance` starts with `if (busy) return`.
 
-### KI-050 · Content: three characters hear a study argument 23:30–23:55 but canon has the victim alone then (phantom argument) · content/medium · open (relative of KI-031)
+### KI-050 · Content: three characters hear a study argument 23:30–23:55 but canon has the victim alone then (phantom argument) · content/medium · ✅ fixed (PR #27 / F1)
 - **Where:** `data/scenarios/storm-mansion.json:160` — per `case.truth`/timeline, 李教授 leaves at 23:20
   (`:278`), 王大明 enters at 00:05 (`:625`); the victim is alone 23:20-00:05. Yet 陈志远 (`:101`, 23:30),
   林雨晴 (`:42`, 23:50), and 赵小雅 (`:160`, 23:55, hearing a line the recording dates to after 00:05) each
@@ -473,7 +475,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Fix:** Move 李教授's argument later or 王大明's entry earlier so all three fall in the real
   confrontation window; or explicitly attribute each testimony to the skewed clock and make it fit.
 
-### KI-051 · Content: public bios spoil the mystery (butler's secret passage + "chilling" framing; professor's "unclean history") · content/medium · open
+### KI-051 · Content: public bios spoil the mystery (butler's secret passage + "chilling" framing; professor's "unclean history") · content/medium · ✅ fixed (PR #27 / F1)
 - **Where:** `storm-mansion.json:218` (王大明 publicInfo names the hidden maintenance passage — the
   round-2 locked-room key from `basement-clue-02:485` — and calls him "令人不寒而栗") and `:277`
   (李教授 publicInfo ends "并不干净的历史", leaking his secret).
@@ -517,7 +519,7 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   guard / AbortController) (`RoomClient.tsx:83`).
 - **KI-065** identity-in-hand entry has no error handling on `refetchState` → permanent "正在进入房间..."
   on failure, and can induce duplicate joins / ghost players (`RoomClient.tsx:89`).
-- **Content lows** — KI-030 confirmed (领用本 digoxin vs foxglove; killer signs own name); 林雨晴 00:10
+- **Content lows** — ✅ fixed (PR #27 / F1): KI-030 confirmed (领用本 digoxin vs foxglove; killer signs own name); 林雨晴 00:10
   sees 王大明 with an empty tray, contradicting the killer's canonical path (`:42`); 王大明 "worked 12
   years" vs "changed name/joined 10 years ago after wife's death" number clash (`:218`); killer script
   has no cover-story guidance and self-defeats vs the known wine-serving routine (`:261`); orphan

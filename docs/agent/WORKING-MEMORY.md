@@ -2,6 +2,43 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-03 — Backlog Batch F (content & reach) PARTIAL: F1 + F2-picker + F3 MERGED
+
+**State:** Green on `main` @ `e63b158`. `npm test` = **268 checks** (info-isolation 112 + gameplay-chat 51 +
+gameplay-reveal 98 + scenario-validation 7 — F1/F2/F3 added no new test files), tsc clean, authoritative
+Turbopack `npm run build` ✓ on the integrated main.
+
+**What landed (3 PRs #26–#28, multi-agent orchestration — opus-4.8 workers in git worktrees, orchestrator
+audited every diff for the isolation invariant + content coherence + squash-merged; F1‖F2 parallel wave, F3 after
+F2's `types/game.ts` merged):**
+- **PR #27 (FA · F1)** — content-coherence pass on `data/scenarios/storm-mansion.json` ONLY. KI-050 phantom
+  argument reconciled by moving the killer's confrontation earlier (new 23:00 clock-skew event, poison 23:15,
+  study 23:30–23:55, leave ~00:00) so 陈志远/林雨晴/赵小雅's testimonies fall in a real window (李教授 still
+  leaves 23:20); KI-031 clock skew now owned by 王大明 (timeline + script + clue significance); KI-030 领用本 now
+  foxglove/强心苷 consistent, signature reduced to a "DM" initial (no self-naming giveaway); KI-051 public bios
+  no longer leak the maintenance passage / professor secret (private facts kept in privateScript); content-lows
+  (empty-tray folded into the 23:50 sighting, 十二年→近十年, killer cover-story guidance, footprints re-tied to
+  the 22:40 tryst, recorder clue explained). No id/killer/relationship/clue-id changes → scenario-validation green.
+- **PR #26 (FB · F2 step 1)** — `GET /api/scenarios` (new `app/api/scenarios/route.ts`) → public `ScenarioCard[]`;
+  `toScenarioCard`/`listScenarioCards` (built field-by-field — never spreads the scenario); home page fetches
+  the catalog + renders a selectable picker feeding `scenarioId` into room creation (falls back to storm-mansion).
+- **PR #28 (FC · F3)** — machine-checkable objectives scoreboard. `RevealInfo.scoreboard: ScoreCard[]` computed
+  **generically** in `buildReveal` from the already-revealed tally/ballots (killer→`escape`+2; non-killers→
+  `not_accused`/`secret_hidden`[0 votes]/`vote_correct` +1 each); staged "本局结算·积分" leaderboard in
+  `RevealRoom` (new stage between ballots and recap, sorted by total, own row highlighted). No scenario-data edits.
+
+**Isolation audited every merge:** F2 card = public metadata only (field-by-field, no characters/case.truth/
+isKiller/secrets/clues); F3 scoreboard reads no private data and lives only inside `reveal` (attached only at
+REVEAL); F1 fixed a public-leaks-private bug in the correct direction (secrets stay in privateScript). See two
+new ADRs in DECISIONS (catalog projection; generic computed scoreboard).
+
+**Remaining in Batch F (not started):** **F4** flow data-ization (`Room.phaseSequence` + `flow:'quick'|'standard'`
++ per-phase durations/auto-advance; digests KI-032/057; M/L, touches the phase engine core — do as its own wave);
+**F5** human↔human private chat (add "target is you" thread to the projection + signal-only event; M);
+**F2 tail** (random-killer variants → LLM-assisted generation w/ auto-solve regression → scenario matrix → UGC import; the "L total").
+
+---
+
 ## Snapshot — 2026-07-02 — Backlog Batch E (robustness lows & housekeeping) IMPLEMENTED & MERGED
 
 **State:** Green on `main` @ `f82fa1e`. `npm test` = **268 checks** (info-isolation 112 + gameplay-chat 51 +
