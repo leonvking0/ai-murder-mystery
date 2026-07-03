@@ -294,6 +294,18 @@ export interface ClueView {
   foundAt?: string; // human-readable location name
 }
 
+// Public catalog entry for the home-page scenario picker. Contains ONLY public metadata —
+// NEVER solution/private fields (characters, case.truth/method/motive, isKiller, secrets, clues).
+export interface ScenarioCard {
+  id: string;
+  title: string;
+  description: string;
+  playerCount: { min: number; max: number };
+  difficulty: Scenario['difficulty'];
+  estimatedDuration: number;
+  atmosphere: string; // from setting.atmosphere — public flavor only
+}
+
 export interface ScenarioPublic {
   id: string;
   title: string;
