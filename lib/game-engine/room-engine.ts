@@ -4,10 +4,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { initializeMemory } from '@/lib/game-engine/memory-manager';
-import { getNextPhase } from '@/lib/game-engine/phase-manager';
+import { FLOWS } from './flow.ts';
+import { getNextPhase, roundForPhase } from './phase-manager.ts';
 import { generatePublicId } from '@/lib/room/auth';
 import { connectedHumanVoteState, reassignHost, seatsToTakeOver } from '@/lib/scenarios/projection';
-import type { CharacterControl, GamePhase, Player, Room, Scenario } from '@/types/game';
+import type { CharacterControl, Player, Room, Scenario } from '@/types/game';
 
 // D2: how long a human's seat may sit disconnected before an NPC takes it over and (if it was the
 // host's seat) the host role is handed off. Pinned at 90s — long enough to survive a refresh/reconnect,
@@ -80,24 +81,11 @@ export function startGame(room: Room, scenario: Scenario): Room {
   };
 }
 
-function roundForPhase(phase: GamePhase, currentRound: number): number {
-  if (phase === 'DISCUSSION_1' || phase === 'INVESTIGATION_1') {
-    return 1;
-  }
-  if (phase === 'DISCUSSION_2' || phase === 'INVESTIGATION_2') {
-    return 2;
-  }
-  if (phase === 'FINAL_DISCUSSION') {
-    return 3;
-  }
-  return currentRound;
-}
-
 export function canAdvanceRoom(room: Room, opts?: { force?: boolean }): boolean {
   if (room.status !== 'in_progress') {
     return false;
   }
-  const next = getNextPhase(room.currentPhase);
+  const next = getNextPhase(room.currentPhase, room.phaseSequence ?? FLOWS.standard);
   if (!next) {
     return false;
   }
@@ -118,7 +106,7 @@ export function advanceRoom(room: Room, opts?: { force?: boolean }): Room | null
   if (!canAdvanceRoom(room, opts)) {
     return null;
   }
-  const next = getNextPhase(room.currentPhase);
+  const next = getNextPhase(room.currentPhase, room.phaseSequence ?? FLOWS.standard);
   if (!next) {
     return null;
   }

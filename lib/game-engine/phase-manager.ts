@@ -1,4 +1,8 @@
-import type { GamePhase, GameSession } from '@/types/game';
+import type { GamePhase } from '@/types/game';
+
+// Relative + explicit `.ts` so the strip-types test runner (which loads this module) resolves this
+// value import at runtime — `@/` aliases resolve only for `import type` there.
+import { FLOWS } from './flow.ts';
 
 export interface PhaseCapabilityConfig {
   description: string;
@@ -7,18 +11,9 @@ export interface PhaseCapabilityConfig {
   allowsVoting: boolean;
 }
 
-export const PHASE_SEQUENCE: GamePhase[] = [
-  'LOBBY',
-  'READING',
-  'INTRO',
-  'DISCUSSION_1',
-  'INVESTIGATION_1',
-  'DISCUSSION_2',
-  'INVESTIGATION_2',
-  'FINAL_DISCUSSION',
-  'VOTING',
-  'REVEAL',
-];
+// Single literal for the standard walk now lives in flow.ts (FLOWS.standard). Re-exported here so
+// existing importers (PhaseIndicator, RoomClient) keep working unchanged.
+export const PHASE_SEQUENCE: GamePhase[] = FLOWS.standard;
 
 export const PHASE_LABELS: Record<GamePhase, string> = {
   LOBBY: '大厅',
@@ -112,47 +107,24 @@ const PHASE_CONFIGS: Record<GamePhase, PhaseCapabilityConfig> = {
   },
 };
 
-function expectedRoundForPhase(phase: GamePhase): number | null {
-  if (phase === 'DISCUSSION_1' || phase === 'INVESTIGATION_1') {
-    return 1;
-  }
+// KI-032: single source of truth for which phases pin a specific round number.
+const PHASE_ROUND: Partial<Record<GamePhase, number>> = {
+  DISCUSSION_1: 1, INVESTIGATION_1: 1,
+  DISCUSSION_2: 2, INVESTIGATION_2: 2,
+  FINAL_DISCUSSION: 3,
+};
 
-  if (phase === 'DISCUSSION_2' || phase === 'INVESTIGATION_2') {
-    return 2;
-  }
-
-  if (phase === 'FINAL_DISCUSSION') {
-    return 3;
-  }
-
-  return null;
+export function roundForPhase(phase: GamePhase, currentRound: number): number {
+  return PHASE_ROUND[phase] ?? currentRound;
 }
 
-export function getNextPhase(current: GamePhase): GamePhase | null {
-  const currentIndex = PHASE_SEQUENCE.indexOf(current);
-  if (currentIndex === -1 || currentIndex >= PHASE_SEQUENCE.length - 1) {
+export function getNextPhase(current: GamePhase, sequence: GamePhase[] = FLOWS.standard): GamePhase | null {
+  const currentIndex = sequence.indexOf(current);
+  if (currentIndex === -1 || currentIndex >= sequence.length - 1) {
     return null;
   }
 
-  return PHASE_SEQUENCE[currentIndex + 1] ?? null;
-}
-
-export function canAdvance(session: GameSession): boolean {
-  const nextPhase = getNextPhase(session.currentPhase);
-  if (!nextPhase) {
-    return false;
-  }
-
-  const expectedRound = expectedRoundForPhase(session.currentPhase);
-  if (expectedRound !== null && session.round !== expectedRound) {
-    return false;
-  }
-
-  if (session.currentPhase === 'VOTING' && Object.keys(session.votes).length === 0) {
-    return false;
-  }
-
-  return true;
+  return sequence[currentIndex + 1] ?? null;
 }
 
 export function getPhaseConfig(phase: GamePhase): PhaseCapabilityConfig {
