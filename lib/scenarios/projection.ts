@@ -146,13 +146,38 @@ export function projectRoomForPlayer(
   // never reach another client.
   const publicIdByPlayerId = new Map(room.players.map(player => [player.id, player.publicId]));
 
-  // Only the requesting player's own private threads. Messages are sanitized (playerId → publicId).
+  // The requesting player's private threads, keyed by the COUNTERPART character. F5: this merges
+  // (a) OUTGOING threads they own (`me:character`, NPC or human target) with (b) INCOMING threads where
+  // another human messaged the character THEY play (`otherPlayer:myCharacter`), so a human↔human chat
+  // reads as one conversation. Isolation: a player only ever sees `me:*` (theirs) and `*:myCharacter`
+  // (addressed to them) — never a third party's thread — and every message is sanitized (playerId →
+  // publicId, KI-066) so a counterpart's seat credential never leaks.
+  const myCharacterId = you.assignedCharacterId;
+  const characterByPlayerId = new Map(room.players.map(player => [player.id, player.assignedCharacterId]));
   const yourPrivateChats: Record<string, ChatMessage[]> = {};
+  const appendThread = (bucketCharacterId: string, messages: ChatMessage[]): void => {
+    const sanitized = messages.map(message => toPublicMessage(message, publicIdByPlayerId));
+    yourPrivateChats[bucketCharacterId] = [...(yourPrivateChats[bucketCharacterId] ?? []), ...sanitized];
+  };
   for (const [key, messages] of Object.entries(room.privateChats)) {
     const [ownerId, characterId] = key.split(':');
-    if (ownerId === playerId && characterId) {
-      yourPrivateChats[characterId] = messages.map(message => toPublicMessage(message, publicIdByPlayerId));
+    if (!characterId) {
+      continue;
     }
+    if (ownerId === playerId) {
+      appendThread(characterId, messages); // (a) outgoing — I messaged this character.
+    } else if (myCharacterId && characterId === myCharacterId) {
+      // (b) incoming — another human messaged my character; bucket under THEIR character so it merges
+      // with my outgoing thread to them into a single conversation.
+      const counterpartCharacterId = characterByPlayerId.get(ownerId);
+      if (counterpartCharacterId) {
+        appendThread(counterpartCharacterId, messages);
+      }
+    }
+  }
+  // Interleave outgoing + incoming per counterpart by time so the merged thread reads in order.
+  for (const bucket of Object.values(yourPrivateChats)) {
+    bucket.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   return {

@@ -4,6 +4,7 @@ import { streamNPCResponse } from '@/lib/agents/npc-agent';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
+import { publish } from '@/lib/realtime/room-bus';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import type { ChatMessage } from '@/types/game';
 
@@ -65,11 +66,34 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
     }
 
     const control = room.characterControl[targetCharacterId];
+
+    // F5: human↔human private chat. When the target seat is controlled by another human, deliver the
+    // message to their isolated thread and signal them to refetch — no LLM, no reply here. The message
+    // is stored ONLY in `${playerId}:${targetCharacterId}`; the projection surfaces it to the target as
+    // an incoming thread (and sanitizes the playerId → publicId, KI-066). The bus event is signal-only:
+    // private content NEVER goes on the room-wide bus.
+    if (control?.kind === 'human') {
+      if (targetCharacterId === player.assignedCharacterId) {
+        return Response.json({ error: '不能私聊自己' }, { status: 400 });
+      }
+      const now = Date.now();
+      const playerMessage: ChatMessage = {
+        id: randomUUID(), role: 'player', characterId: targetCharacterId, playerId, content: message, timestamp: now,
+      };
+      const threadKey = `${playerId}:${targetCharacterId}`;
+      updateRoom(id, current => {
+        const currentThread = current.privateChats[threadKey] ?? [];
+        return {
+          ...current,
+          privateChats: { ...current.privateChats, [threadKey]: [...currentThread, playerMessage] },
+        };
+      });
+      publish(id, { type: 'room_state' });
+      return Response.json({ ok: true, delivered: 'human' });
+    }
+
     if (control?.kind !== 'npc') {
-      return Response.json(
-        { error: '对方由真人扮演，请在群聊中交流（私聊真人暂未开放）' },
-        { status: 400 },
-      );
+      return Response.json({ error: '对方暂不可私聊' }, { status: 400 });
     }
 
     const memory = room.characterMemories[targetCharacterId];
