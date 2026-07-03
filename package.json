@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types tests/info-isolation.test.ts && node --experimental-strip-types tests/gameplay-chat.test.ts && node --experimental-strip-types tests/gameplay-reveal.test.ts && node --experimental-strip-types tests/scenario-validation.test.ts && node --experimental-strip-types tests/flow.test.ts"
+    "test": "node --experimental-strip-types tests/info-isolation.test.ts && node --experimental-strip-types tests/gameplay-chat.test.ts && node --experimental-strip-types tests/gameplay-reveal.test.ts && node --experimental-strip-types tests/scenario-validation.test.ts && node --experimental-strip-types tests/flow.test.ts && node --experimental-strip-types tests/gameplay-investigation.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.38",

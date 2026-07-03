@@ -8,7 +8,7 @@
 // Run: npm test   (node --experimental-strip-types; no extra deps)
 
 // VALUE imports must use relative `.ts` paths — the `@/` alias resolves only for `import type`.
-import { resolveFlow, FLOWS } from '../lib/game-engine/flow.ts';
+import { resolveFlow, FLOWS, FLOW_LABELS } from '../lib/game-engine/flow.ts';
 import { getNextPhase, roundForPhase, PHASE_SEQUENCE } from '../lib/game-engine/phase-manager.ts';
 import type { GamePhase } from '@/types/game';
 
@@ -84,6 +84,38 @@ check('roundForPhase INVESTIGATION_2 → 2', roundForPhase('INVESTIGATION_2', 99
 check('roundForPhase FINAL_DISCUSSION → 3', roundForPhase('FINAL_DISCUSSION', 99) === 3);
 check('roundForPhase INTRO (non-pinned) passes currentRound through (7)', roundForPhase('INTRO', 7) === 7);
 check('roundForPhase LOBBY (non-pinned) passes currentRound through (1)', roundForPhase('LOBBY', 1) === 1);
+
+// ---- F4-b: quick flow preset ----
+console.log('\nQuick flow preset (F4-b):');
+
+const QUICK: GamePhase[] = [
+  'LOBBY',
+  'READING',
+  'INTRO',
+  'DISCUSSION_1',
+  'INVESTIGATION_1',
+  'FINAL_DISCUSSION',
+  'VOTING',
+  'REVEAL',
+];
+
+check("resolveFlow('quick') equals the 8-phase quick sequence", arrEq(resolveFlow('quick'), QUICK));
+check('FLOWS.quick equals the 8-phase quick sequence', arrEq(FLOWS.quick, QUICK));
+check('quick flow drops DISCUSSION_2', !FLOWS.quick.includes('DISCUSSION_2'));
+check('quick flow drops INVESTIGATION_2', !FLOWS.quick.includes('INVESTIGATION_2'));
+
+// getNextPhase walks the quick sequence.
+check('getNextPhase(DISCUSSION_1, quick) → INVESTIGATION_1', getNextPhase('DISCUSSION_1', QUICK) === 'INVESTIGATION_1');
+check('getNextPhase(INVESTIGATION_1, quick) → FINAL_DISCUSSION', getNextPhase('INVESTIGATION_1', QUICK) === 'FINAL_DISCUSSION');
+check('getNextPhase(FINAL_DISCUSSION, quick) → VOTING', getNextPhase('FINAL_DISCUSSION', QUICK) === 'VOTING');
+check('getNextPhase(VOTING, quick) → REVEAL', getNextPhase('VOTING', QUICK) === 'REVEAL');
+check('getNextPhase(REVEAL, quick) → null (last in quick)', getNextPhase('REVEAL', QUICK) === null);
+check('getNextPhase(DISCUSSION_2, quick) → null (absent from quick)', getNextPhase('DISCUSSION_2', QUICK) === null);
+check('getNextPhase(INVESTIGATION_2, quick) → null (absent from quick)', getNextPhase('INVESTIGATION_2', QUICK) === null);
+
+// FLOW_LABELS covers both presets.
+check('FLOW_LABELS has a standard entry', typeof FLOW_LABELS.standard?.title === 'string' && typeof FLOW_LABELS.standard?.description === 'string');
+check('FLOW_LABELS has a quick entry', typeof FLOW_LABELS.quick?.title === 'string' && typeof FLOW_LABELS.quick?.description === 'string');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

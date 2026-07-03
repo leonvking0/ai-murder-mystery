@@ -5,11 +5,13 @@ import type { GamePhase } from '@/types/game';
 
 interface PhaseIndicatorProps {
   phase: GamePhase;
+  // F4-b: the room's phase walk (quick vs standard). Defaults to the standard sequence for back-compat.
+  sequence?: GamePhase[];
 }
 
-export function PhaseIndicator({ phase }: PhaseIndicatorProps) {
-  const currentIndex = Math.max(0, PHASE_SEQUENCE.indexOf(phase));
-  const progress = (currentIndex / (PHASE_SEQUENCE.length - 1)) * 100;
+export function PhaseIndicator({ phase, sequence = PHASE_SEQUENCE }: PhaseIndicatorProps) {
+  const currentIndex = Math.max(0, sequence.indexOf(phase));
+  const progress = (currentIndex / (sequence.length - 1)) * 100;
   const config = getPhaseConfig(phase);
 
   return (
@@ -21,7 +23,7 @@ export function PhaseIndicator({ phase }: PhaseIndicatorProps) {
           <p className="mt-1 text-sm text-slate-300">{config.description}</p>
         </div>
         <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-3 py-1 text-xs text-amber-200">
-          {currentIndex + 1}/{PHASE_SEQUENCE.length}
+          {currentIndex + 1}/{sequence.length}
         </span>
       </div>
 
@@ -33,7 +35,7 @@ export function PhaseIndicator({ phase }: PhaseIndicatorProps) {
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {PHASE_SEQUENCE.map((item, index) => {
+        {sequence.map((item, index) => {
           const completed = index <= currentIndex;
           return (
             <span

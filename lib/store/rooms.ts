@@ -10,6 +10,7 @@ import { dirname } from 'node:path';
 // (`@/` aliases resolve only for type-only imports there). See tests/info-isolation.test.ts.
 import { generatePublicId } from '../room/auth.ts';
 import { resolveFlow } from '../game-engine/flow.ts';
+import type { FlowId } from '../game-engine/flow.ts';
 import type { Player, Room, RoomStatus } from '@/types/game';
 
 // Survive Next dev HMR (module reloads) by hanging the db handle off globalThis, mirroring the emitter
@@ -126,6 +127,7 @@ function parseRow(row: { data: string } | undefined): Room | undefined {
 export interface CreateRoomInput {
   scenarioId: string;
   hostName: string;
+  flowId?: FlowId;
 }
 
 export function createRoom(input: CreateRoomInput): Room {
@@ -146,7 +148,7 @@ export function createRoom(input: CreateRoomInput): Room {
     status: 'lobby',
     currentPhase: 'LOBBY',
     round: 1,
-    phaseSequence: resolveFlow(),
+    phaseSequence: resolveFlow(input.flowId),
     hostPlayerId: hostPlayer.id,
     players: [hostPlayer],
     characterControl: {},
