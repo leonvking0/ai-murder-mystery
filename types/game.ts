@@ -241,6 +241,9 @@ export interface Room {
   status: RoomStatus;
   currentPhase: GamePhase;
   round: number;
+  // F4: the ordered phase walk this room follows (stamped at createRoom from the selected flow).
+  // Optional for backward-compat with rooms persisted before F4; read sites fall back to FLOWS.standard.
+  phaseSequence?: GamePhase[];
   hostPlayerId: string;
 
   players: Player[];
