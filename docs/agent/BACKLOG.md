@@ -11,12 +11,13 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-02:** ✅ **Batches A (security), B (min gameplay loop), C (robustness), D (gameplay
-> depth), and E (robustness lows & housekeeping) are DONE.** A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**;
-> **E via #21–#25** (same multi-agent orchestration: opus-4.8 workers in git worktrees, orchestrator audit +
-> squash-merge; E ran as a single file-disjoint parallel wave of 4 workers). Test suite 22 → 90 → 156 → 261 →
-> **268 checks** (info-isolation 112 + gameplay-chat 51 + gameplay-reveal 98 + scenario-validation 7).
-> tsc/eslint/Turbopack build green. Next up: **Batch F (content & reach)**.
+> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3 landed.
+> A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**; **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**
+> (same multi-agent orchestration: opus-4.8 workers in git worktrees, orchestrator audit + squash-merge; F1+F2
+> ran as a file-disjoint parallel wave, F3 followed once F2's `types/game.ts` merged). Test suite 22 → 90 → 156 →
+> 261 → **268 checks** (F1/F2/F3 added no new test files; content + additive projection/UI only).
+> tsc/eslint/Turbopack build green. **Remaining in F: F4 (flow data-ization, M/L), F5 (human↔human private
+> chat, M), and F2 advanced (random-killer variants, LLM-gen, UGC — the "L total" tail).**
 > Deferred follow-ups still open: first-come-exclusive private clues (part of C8); signed reconnect cookie to
 > rebind a seat (part of C5/D2); the compaction read-modify-write vs a concurrent `present-clue` is a narrow,
 > self-healing race (accepted). (KI-059 provider/key mismatch was closed in Batch E / PR #23; the genuinely
@@ -152,17 +153,22 @@
 
 ## Batch F — Content & reach 📚
 
-- [ ] **F1 · Fix the storm-mansion content bugs** — KI-050 (phantom 23:30-23:55 argument), KI-051 (public
-  bios spoil passage/secret), KI-030 (digoxin vs foxglove), KI-031 (orphan clock skew), plus the KI-052..
-  low content notes (empty-tray sighting, 12y/10y clash, killer cover-story, orphan footprints/recorder,
-  over-signposted difficulty). **File:** `data/scenarios/storm-mansion.json`. — **M**
-- [ ] **F2 · Content supply pipeline** — `GET /api/scenarios` + `toScenarioCard` + home scenario picker
-  (wires the already-built multi-scenario backend); then same-scenario random-killer variants; then
-  LLM-assisted generation with a "auto-solve" regression; then a scenario matrix (6-7 player, short,
-  varied genres); then JSON-import UGC. **Files:** `registry.ts`, `page.tsx`, `types/game.ts`. — **S start, L total**
-- [ ] **F3 · objectives scoring (KI-013 sibling)** — machine-checkable objective types
-  (not_accused / vote_correct / secret_hidden) + a REVEAL scoreboard, so non-killers have a reason to
-  conceal. **Files:** `types/game.ts`, `projection.ts`, `RoomPanels.tsx`. — **M**
+- [x] **F1 · Fix the storm-mansion content bugs** ✅ PR #27 — KI-050 (phantom argument: killer's confrontation
+  moved to 23:30–23:55 so the three testimonies fall in a real window), KI-051 (public bios no longer spoil the
+  maintenance passage / professor secret), KI-030 (领用本 now foxglove/强心苷 consistent; signature reduced to a
+  "DM" initial), KI-031 (clock skew now owned by 王大明 via a new 23:00 timeline event + script + clue significance),
+  plus the content-lows (empty-tray folded into the 23:50 sighting, 十二年→近十年, killer cover-story guidance,
+  footprints re-tied to the 22:40 tryst, recorder clue explained). **File:** `data/scenarios/storm-mansion.json`. — **M**
+- [~] **F2 · Content supply pipeline** — **step 1 done** ✅ PR #26: `GET /api/scenarios` + `toScenarioCard` /
+  `listScenarioCards` + home scenario picker (wires the already-built multi-scenario registry; card is public
+  metadata only). **Still open (the "L total" tail):** same-scenario random-killer variants; LLM-assisted
+  generation with an "auto-solve" regression; a scenario matrix (6-7 player, short, varied genres); JSON-import
+  UGC. **Files:** `registry.ts`, `page.tsx`, `types/game.ts`, new `app/api/scenarios/route.ts`. — **S done, L remains**
+- [x] **F3 · objectives scoring (KI-013 sibling)** ✅ PR #28 — machine-checkable scorecard computed at REVEAL
+  **generically from the already-revealed tally/ballots** (killer→`escape`; non-killers→`not_accused` /
+  `secret_hidden` [0 votes] / `vote_correct`) + a staged "本局结算·积分" leaderboard, so non-killers have a
+  scored reason to conceal. No scenario-data authoring needed. **Files:** `types/game.ts`, `projection.ts`,
+  `RoomPanels.tsx`. — **M**
 - [ ] **F4 · Flow data-ization (digest KI-032)** — `Room.phaseSequence` + `flow: 'quick'|'standard'`;
   per-phase suggested durations / optional auto-advance (also enables async play + no host-offline stall). — **M/L**
 - [ ] **F5 · Human↔human private chat** — key structure already supports it; add "target is you" thread to

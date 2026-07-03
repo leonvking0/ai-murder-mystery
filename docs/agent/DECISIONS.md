@@ -230,3 +230,33 @@ nothing — a raw playerId can never enter a ballot (a taken-over seat still res
 The staged reveal is pure client-side progressive disclosure (no server pacing / new events).
 **Consequences:** Because chat is open in VOTING, present-clue + private-chat are also available there (same gate)
 — intended. The ballots isolation guarantee is covered by a dedicated regression test incl. the taken-over-seat case.
+
+## 2026-07-03 — Public scenario catalog is a field-by-field projection; picker wires the existing registry — Accepted
+**Context (F2 step 1):** The `registry.ts` already validated + registered scenarios generically, but the home
+page hardcoded `scenarioId:'storm-mansion'`. Exposing a scenario list to the client risks leaking solution data
+(characters, `case.truth/method/motive`, `isKiller`, secrets, clues) if done carelessly (e.g. spreading the
+`Scenario`).
+**Decision:** Add a `ScenarioCard` type carrying ONLY public metadata (id/title/description/playerCount/
+difficulty/estimatedDuration/atmosphere) and a `toScenarioCard` that builds it **field-by-field** (never spreads
+the scenario). `GET /api/scenarios` (no auth — public catalog) returns `listScenarioCards()`; the home page
+fetches it and renders a picker feeding `scenarioId` into room creation, falling back to `storm-mansion` if the
+catalog hasn't loaded. Room-creation/auth/projection logic is unchanged.
+**Consequences:** Any new public catalog field must be added explicitly to `ScenarioCard` + `toScenarioCard`
+(the field-by-field rule is the isolation guard — do not switch to a spread). The later F2 tail (random-killer
+variants, LLM generation, UGC import) layers on top of this registry/endpoint and is still open.
+
+## 2026-07-03 — REVEAL objectives scoreboard is computed generically, not authored per scenario — Accepted
+**Context (F3):** Non-killers had no scored reason to conceal or deduce. The backlog named machine-checkable
+objective types (not_accused / vote_correct / secret_hidden). One option was to annotate each character's
+free-text `objectives` in every scenario JSON with a checkable condition.
+**Decision:** Compute the scoreboard **generically at reveal time** from data `buildReveal` already has (killer,
+`tally`, `ballots`, `accusedCharacterId`, `groupCorrect`, `cast`) — no scenario-data authoring. Killer → one
+`escape` objective (+2 if not caught); non-killers → `not_accused` (not the group's accused), `secret_hidden`
+(zero votes — a machine-checkable proxy for "stayed off everyone's radar"), `vote_correct` (their ballot
+fingered the killer), +1 each. `RevealInfo.scoreboard: ScoreCard[]` lives only inside `reveal` (attached only in
+the REVEAL phase), reads NO private per-character data, and works for every current/future scenario for free.
+**Consequences:** `secret_hidden` is a proxy (0 votes), not literal secret-leak tracking — revisit if we ever
+track which secrets actually surfaced. If a scenario ever wants bespoke per-character objectives, layer an
+optional annotated path on top; the generic default must remain so unauthored scenarios still score. If a
+killer *faction* (>1 killer) is ever added, the escape/`groupCorrect` logic must change together with the
+exactly-one-killer validation invariant (see the LLM/validation ADR) and the win/loss `outcome` table.
