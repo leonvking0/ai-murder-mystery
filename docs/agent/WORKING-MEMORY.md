@@ -2,6 +2,33 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
+## Snapshot — 2026-07-03 (latest) — F4 flow data-ization (a+b) MERGED
+
+**State:** Green on `main` @ `43944da`. `npm test` = **327 checks** (info-isolation 123 + gameplay-chat 51 +
+gameplay-reveal 98 + scenario-validation 7 + **flow 41** + **gameplay-investigation 7**), tsc/eslint clean,
+Turbopack build ✓ Compiled. Worktrees cleaned; no in-flight work.
+
+**What landed (2 PRs, opus workers in worktrees `wf4a`/`wf4b`, orchestrator audited every diff for behavior
+equivalence + isolation, ran the authoritative build on main, squash-merged):**
+- **PR #33 (F4-a, zero behavior change)** — `lib/game-engine/flow.ts` (`FLOWS`/`resolveFlow`); `Room.phaseSequence?`
+  stamped at `createRoom`; `getNextPhase(current, sequence)` parametrized. KI-032: one `PHASE_ROUND` map +
+  exported `roundForPhase`; deleted the duplicate in room-engine + the dead `canAdvance(session)`. `FLOWS.standard`
+  == old `PHASE_SEQUENCE` byte-for-byte → all 279 pre-existing checks unchanged (+28 flow tests).
+- **PR #34 (F4-b, quick preset)** — selectable `flow: 'standard'|'quick'` (home 节奏 picker → validated
+  `/api/room` → createRoom). **Flow-aware investigation ceiling** (the crux): the last investigation phase in a
+  flow exposes every clue round → quick (single INVESTIGATION_1) stays solvable; standard byte-identical. Projection
+  ships public `phaseSequence` (game structure, NOT a secret — the ONLY new client field) so `PhaseIndicator`
+  renders quick's 8 steps. +7 investigation checks proving standard-unchanged + quick-solvable, +13 flow checks.
+
+**Isolation audit:** `phaseSequence` is the only new client-visible field and is public phase ordering; no secrets,
+NPC prompts, `clue.significance`, reveal, or auth touched. `flowId` sanitized to `'quick'|'standard'` at the route.
+
+**Next:** **F4-c** (per-phase durations + optional auto-advance timers + scenario-driven GM narration override —
+own wave; auto-advance interacts with D2 seat takeover) OR **F2 advanced tail** (random-killer variants → LLM-gen
+with auto-solve regression → scenario matrix → UGC import). KI-023 (rate-limit/auth breadth) still open before public hosting.
+
+---
+
 ## Snapshot — 2026-07-03 (later) — Batch F continued: KI-066 security fix + F5 human private chat MERGED
 
 **State:** Green on `main` @ `70d4091`. `npm test` = **279 checks** (info-isolation 112→**123**: +6 KI-066,

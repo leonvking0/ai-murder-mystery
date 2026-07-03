@@ -11,11 +11,12 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3, **F5** landed,
+> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3, F5, **F4 (a+b)** landed,
 > plus a security fix (**KI-066**) found during F5 pre-flight. A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**;
-> **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**; **KI-066 via #30**; **F5 via #31**. Test suite 22 → 90 →
-> 156 → 261 → 268 → **279 checks** (info-isolation 112→123: +6 KI-066, +5 F5). tsc/eslint/Turbopack build green.
-> **Remaining in F: F4 (flow data-ization, M/L — own wave, touches the phase engine) and F2 advanced
+> **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**; **KI-066 via #30**; **F5 via #31**; **F4-a via #33**; **F4-b via #34**.
+> Test suite 22 → 90 → 156 → 261 → 268 → 279 → 307 → **327 checks** (added `tests/flow.test.ts` +41 and
+> `tests/gameplay-investigation.test.ts` +7). tsc/eslint/Turbopack build green.
+> **Remaining in F: F4-c (flow pacing/auto-advance + scenario narration — own wave) and F2 advanced
 > (random-killer variants, LLM-gen, UGC — the "L total" tail).**
 > Deferred follow-ups still open: first-come-exclusive private clues (part of C8); signed reconnect cookie to
 > rebind a seat (part of C5/D2); the compaction read-modify-write vs a concurrent `present-clue` is a narrow,
@@ -168,8 +169,17 @@
   `secret_hidden` [0 votes] / `vote_correct`) + a staged "本局结算·积分" leaderboard, so non-killers have a
   scored reason to conceal. No scenario-data authoring needed. **Files:** `types/game.ts`, `projection.ts`,
   `RoomPanels.tsx`. — **M**
-- [ ] **F4 · Flow data-ization (digest KI-032)** — `Room.phaseSequence` + `flow: 'quick'|'standard'`;
-  per-phase suggested durations / optional auto-advance (also enables async play + no host-offline stall). — **M/L**
+- [x] **F4 · Flow data-ization (digest KI-032)** — ✅ **F4-a (PR #33)** + **F4-b (PR #34)**. F4-a: `lib/game-engine/flow.ts`
+  (`FLOWS`/`resolveFlow`) + `Room.phaseSequence` stamped at createRoom + parametrized `getNextPhase(current, sequence)`;
+  single `PHASE_ROUND` round map (KI-032 dedup), dead `canAdvance` deleted; **strictly zero behavior change**. F4-b:
+  selectable `flow: 'standard'|'quick'` (home 节奏 picker → validated `/api/room` → createRoom) + a flow+scenario-aware
+  **investigation ceiling** (the last investigation phase in a flow exposes every clue round → quick stays solvable;
+  standard byte-identical) + public `phaseSequence` in the projection so `PhaseIndicator` renders quick's 8 steps.
+  Tests 279 → 307 → **327** (new `tests/flow.test.ts` + `tests/gameplay-investigation.test.ts`). — **M/L**
+- [ ] **F4-c · Flow pacing & scenario narration (deferred tail of F4)** — per-phase suggested durations + optional
+  auto-advance timers (enables async play + no host-offline stall), and scenario-driven GM narration override
+  (read `scenario.phases.gmScript`, fall back to `PHASE_NARRATIONS`). Auto-advance is a distinct mechanism (timer +
+  D2 takeover interplay) — own wave. Closes the last of KI-032/KI-057. — **M**
 - [x] **F5 · Human↔human private chat** ✅ PR #31 — a human-controlled target no longer 400s: the message is
   stored in the sender's isolated thread + a **signal-only** `room_state` event fires (no private content on the
   bus); the projection merges, per counterpart character, OUTGOING (`me:character`) with INCOMING

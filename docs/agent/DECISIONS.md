@@ -292,3 +292,34 @@ any future feature that reads `room.privateChats` directly (not through the proj
 `me:* ∪ *:myCharacter` visibility rule + sanitization. A seat taken over by an NPC (D2) is treated as an AI
 target by the route (`characterControl.kind==='npc'`) and the UI (`controlledByNpc`), so a disconnected human's
 seat correctly falls back to LLM replies.
+
+## 2026-07-03 — The phase flow is data (`Room.phaseSequence`), not a hardcoded const — Accepted
+**Context (F4-a):** `PHASE_SEQUENCE`, the round→phase map, and `getNextPhase` were hardcoded module state in
+`phase-manager.ts`, with a second copy of the round map in `room-engine.ts` (KI-032). `Scenario.phases` existed
+but was dead. Every scenario was forced into the fixed 10-phase storm-mansion shape.
+**Decision:** A *flow* is an ordered `GamePhase[]` (`lib/game-engine/flow.ts` — `FLOWS`, `resolveFlow`). A room
+carries its own `phaseSequence`, stamped at `createRoom`; `getNextPhase(current, sequence)` is parametrized on it
+(defaulting to `FLOWS.standard`, and read sites fall back to it for legacy rooms). Per-phase *semantics*
+(label / narration / capability config / round) stay keyed by `GamePhase` **type** (reusable across flows) —
+a flow only chooses which phases and in what order. The round map is one `PHASE_ROUND` source of truth +
+exported `roundForPhase`. `FLOWS.standard` reproduces the old sequence byte-for-byte, so F4-a is provably
+zero-behavior-change (all pre-existing checks unchanged).
+**Consequences:** `phaseSequence` is server-only in F4-a; F4-b adds it to the projection as *public game
+structure* (not a secret) so the client renders the right step count. New scenarios/presets can define their own
+walk without touching advance logic. GM narration text is still `PHASE_NARRATIONS` defaults (scenario-driven
+override is F4-c).
+
+## 2026-07-03 — A shorter flow stays solvable via a flow-aware investigation ceiling — Accepted
+**Context (F4-b):** Clue availability gated on `clue.availableInRound <= round`, where `round` came from a fixed
+`INVESTIGATION_1→1 / INVESTIGATION_2→2` map. Any flow with fewer investigation phases (the new `quick` flow drops
+INVESTIGATION_2) would leave round-2 clues — the storm-mansion key evidence — permanently undiscoverable, i.e.
+the case becomes unsolvable.
+**Decision:** Compute the ceiling from the room's flow + scenario, not a fixed map: **the LAST investigation
+phase in `room.phaseSequence` exposes every clue round the scenario authored** (`max(availableInRound)`); earlier
+investigation phases expose only their ordinal. Standard `[I1,I2]` is byte-identical (I1→1; I2 is last→max=2);
+quick `[I1]` → I1 is last → max=2, so all clues stay reachable. Proven by `tests/gameplay-investigation.test.ts`
+(standard-unchanged + quick-solvable, with a guard that a round-2 clue actually exists).
+**Consequences:** A "quick" player still gets the full evidence set, just fewer *searches* (the per-phase
+`INVESTIGATION_BUDGET` is unchanged, so quick = one investigation phase = fewer total searches — an intended
+depth/time tradeoff, not a solvability blocker). Any future flow with a different investigation-phase count
+inherits solvability for free.

@@ -26,7 +26,8 @@ by the room system, which fixed most findings at the root. Detailed per-item sta
   investigation prerequisite chains, and the always-on case/script drawer.
 - **⬜ Still open (carried forward):** KI-023 (**no rate limit / auth beyond seat cookie — still important before
   public hosting**; note Batch E added per-IP limits on `join` + `resolve`),
-  KI-032/KI-057 (phase engine ignores `scenario.phases`; hardcoded flavor → **Batch F4, still open**).
+  KI-032/KI-057 (phase engine flow + round-map — **fixed F4-a/F4-b, PRs #33/#34**; scenario-driven narration
+  + durations/auto-advance deferred to F4-c).
   *(KI-009/011/013/015/016/028/033/052/053/054/055/056/059/060/062 fixed in Batches B–E; KI-030/031/050/051 +
   content-lows fixed in Batch F1/PR #27; F3/PR #28 added the REVEAL objectives scoreboard; KI-027 addressed by
   KI-044/059.)*
@@ -276,12 +277,16 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **Impact:** A red herring the player can never resolve into the answer.
 - **Fix:** Attribute the clock change to a character (and reflect it in their timeline), or cut it.
 
-### KI-032 · Phase engine ignores `scenario.phases` entirely · design/low · open
-- **Where:** `phase-manager.ts:10-110` hardcodes `PHASE_SEQUENCE` / `PHASE_CONFIGS` / `PHASE_NARRATIONS`
-  and `expectedRoundForPhase`; the scenario's `phases` (with `round`/`duration`/`gmScript`) are never
-  read. The round→phase map is also duplicated in `advance/route.ts:14` (drift risk).
-- **Fix:** Drive the flow from `scenario.phases` (data-driven), or delete the unused scenario `phases`
-  + `duration` to stop implying configurability. De-duplicate the round mapping.
+### KI-032 · Phase engine hardcoded the flow + duplicated the round map · design/low · ✅ fixed (PRs #33/#34 · F4-a/F4-b)
+- **Where (was):** `phase-manager.ts` hardcoded `PHASE_SEQUENCE` and `expectedRoundForPhase`; the round→phase
+  map was duplicated in a private `roundForPhase` in `room-engine.ts` (drift risk).
+- **Fix:** F4-a (PR #33) made the sequence data — `lib/game-engine/flow.ts` (`FLOWS`, `resolveFlow`) +
+  `Room.phaseSequence` stamped at `createRoom`; `getNextPhase(current, sequence)` is parametrized. The round
+  map is now a single `PHASE_ROUND` source of truth + exported `roundForPhase`; the duplicate + the dead
+  `canAdvance(session)` were deleted. F4-b (PR #34) added the selectable `quick` flow and a flow-aware
+  investigation ceiling. **Still not read: `scenario.phases` `gmScript`/`duration`** — scenario-driven
+  narration override + per-phase durations/auto-advance are deferred to **F4-c** (see BACKLOG); `PHASE_NARRATIONS`
+  defaults (keyed by phase) still drive GM text.
 
 ### KI-033 · `AGENTS.md` tech stack is stale and will mislead agents · maintainability/nit · ✅ fixed (PR #25 / E7)
 - **Where:** `AGENTS.md:13-16` still says `@anthropic-ai/sdk` + SQLite/Drizzle; the code uses the Vercel
@@ -497,8 +502,9 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **KI-056** (= KI-028) ✅ fixed (PR #22 / E3) `validateScenario` now enforces exactly-one-killer, integer
   `availableInRound` ≥ 1, and relationship `characterId` referential integrity; clue-id uniqueness + acyclic
   prereqs were already added by D6. Covered by `tests/scenario-validation.test.ts` (`schema.ts`).
-- **KI-057** (= KI-032) phase text hardcodes storm-mansion flavor; round map duplicated in 3 places, some
-  now dead (`phase-manager.ts:36`). → deferred to Batch F (F4, flow data-ization).
+- **KI-057** (= KI-032) ✅ round-map dedup + flow data-ization done (F4-a/F4-b, PRs #33/#34). Remaining:
+  phase GM text still uses `PHASE_NARRATIONS` defaults, not `scenario.phases.gmScript` → scenario-driven
+  narration deferred to **F4-c**.
 - **KI-058** (= KI-016) ✅ fixed (Batch C, PR #10) shared NPC memory is compacted via `summarizeConversations`
   past 20 entries (`compactConversationsIfNeeded`), and private-chat truncates the model input to the last 16;
   confirmed still resolved during Batch E (E4 was the token cap only) (`memory-manager.ts`, chat routes).
