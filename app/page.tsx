@@ -27,6 +27,7 @@ export default function HomePage() {
   const [scenarios, setScenarios] = useState<ScenarioCard[]>([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [selectedFlowId, setSelectedFlowId] = useState<FlowId>('standard');
+  const [autoAdvance, setAutoAdvance] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,7 +57,7 @@ export default function HomePage() {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName, flowId: selectedFlowId }),
+        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName, flowId: selectedFlowId, autoAdvance }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -162,6 +163,23 @@ export default function HomePage() {
                 );
               })}
             </div>
+          </section>
+
+          <section>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700/80 bg-slate-900/50 p-4 transition hover:border-slate-600">
+              <input
+                type="checkbox"
+                checked={autoAdvance}
+                onChange={e => setAutoAdvance(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600"
+              />
+              <span>
+                <span className="text-sm font-medium text-amber-100">自动推进</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
+                  到点自动进入下一阶段，适合异步局（无需房主全程盯着推进）。
+                </span>
+              </span>
+            </label>
           </section>
 
           <section>

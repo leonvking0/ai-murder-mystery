@@ -7,6 +7,8 @@ interface CreateRoomBody {
   scenarioId?: string;
   hostName?: string;
   flowId?: FlowId;
+  // F4-d: opt in to deadline-based auto-advance (default false).
+  autoAdvance?: boolean;
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -28,7 +30,7 @@ export async function POST(req: Request): Promise<Response> {
     // Validate the flow preset: only the two known ids are accepted; anything else (incl. undefined)
     // falls back to the standard flow.
     const flowId: FlowId = body.flowId === 'quick' ? 'quick' : 'standard';
-    const room = createRoom({ scenarioId, hostName, flowId });
+    const room = createRoom({ scenarioId, hostName, flowId, autoAdvance: body.autoAdvance === true });
     const host = room.players[0];
 
     // Seat the host: bind their playerId into a signed httpOnly per-room cookie. The response body no

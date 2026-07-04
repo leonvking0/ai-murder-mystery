@@ -2,7 +2,7 @@ import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { projectRoomForPlayer } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
-import { startGame } from '@/lib/game-engine/room-engine';
+import { phaseDeadlineFor, startGame } from '@/lib/game-engine/room-engine';
 import { publish } from '@/lib/realtime/room-bus';
 
 interface RouteContext {
@@ -40,7 +40,9 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       if (current.status !== 'lobby' || current.hostPlayerId !== playerId) {
         return null;
       }
-      return startGame(current, scenario);
+      // F4-d: stamp the READING phase's auto-advance deadline (undefined when auto-advance is off).
+      const started = startGame(current, scenario);
+      return { ...started, phaseDeadline: phaseDeadlineFor(started, scenario, Date.now()) };
     });
 
     if (!updated || updated.status !== 'in_progress') {

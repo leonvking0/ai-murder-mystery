@@ -128,6 +128,9 @@ export interface CreateRoomInput {
   scenarioId: string;
   hostName: string;
   flowId?: FlowId;
+  // F4-d: opt in to deadline-based auto-advance (default false). No phaseDeadline is set at LOBBY; the
+  // host still starts the game deliberately, and deadlines are stamped on each in-game phase entry.
+  autoAdvance?: boolean;
 }
 
 export function createRoom(input: CreateRoomInput): Room {
@@ -149,6 +152,7 @@ export function createRoom(input: CreateRoomInput): Room {
     currentPhase: 'LOBBY',
     round: 1,
     phaseSequence: resolveFlow(input.flowId),
+    autoAdvance: input.autoAdvance === true,
     hostPlayerId: hostPlayer.id,
     players: [hostPlayer],
     characterControl: {},

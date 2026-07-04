@@ -250,6 +250,13 @@ export interface Room {
   // F4: the ordered phase walk this room follows (stamped at createRoom from the selected flow).
   // Optional for backward-compat with rooms persisted before F4; read sites fall back to FLOWS.standard.
   phaseSequence?: GamePhase[];
+  // F4-d: opt-in deadline-based auto-advance (async / no-host-stall play). Set at createRoom (default
+  // false). When true, each phase entry stamps `phaseDeadline`; any member may auto-advance past it.
+  autoAdvance?: boolean;
+  // F4-d: epoch ms — the wall-clock time the CURRENT phase may auto-advance. A persisted timestamp (no
+  // server timer): survives restarts, and any client / poll path triggers the advance once it passes.
+  // Absent when auto-advance is off or the phase has no duration (or is terminal REVEAL). PUBLIC.
+  phaseDeadline?: number;
   hostPlayerId: string;
 
   players: Player[];
@@ -408,6 +415,10 @@ export interface PlayerRoomView {
     // F4-b: the room's ordered phase walk (public game structure — which phases, in what order — NOT a
     // secret). Lets the client render the right number of steps for quick vs standard flows.
     phaseSequence: GamePhase[];
+    // F4-d: whether this room auto-advances phases on a deadline (public — a countdown is not secret),
+    // and the epoch-ms deadline for the CURRENT phase (absent when off / no duration / terminal REVEAL).
+    autoAdvance?: boolean;
+    phaseDeadline?: number;
     // Non-secret render id of the host (KI-034): shipping the host's real `hostPlayerId` here leaked a
     // seat auth credential to every member. Clients identify the host via `you.isHost` / `player.isHost`.
     hostPublicId: string;

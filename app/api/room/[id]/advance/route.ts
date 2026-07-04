@@ -6,7 +6,7 @@ import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { applyTieRevote, projectRoomForPlayer, tallyVotes } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
-import { advanceRoom, canAdvanceRoom } from '@/lib/game-engine/room-engine';
+import { advanceRoom, canAdvanceRoom, phaseDeadlineFor } from '@/lib/game-engine/room-engine';
 import { publish } from '@/lib/realtime/room-bus';
 import type { ChatMessage, GamePhase } from '@/types/game';
 
@@ -16,6 +16,10 @@ interface AdvanceBody {
   expectedPhase?: GamePhase;
   // C9 / KI-043: host-only override of the "all connected humans have voted" gate.
   force?: boolean;
+  // F4-d: deadline-based auto-advance. When true, ANY room member may advance — but only once the
+  // persisted `phaseDeadline` has passed — and the VOTING gate is treated as forced (async play never
+  // stalls on an absent human). When absent/false, behavior is the host-only manual path, unchanged.
+  auto?: boolean;
 }
 
 interface RouteContext {
@@ -33,7 +37,11 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       body = {};
     }
     const expectedPhase = body.expectedPhase;
+    const auto = body.auto === true;
+    // F4-d: an auto-advance implies force semantics for the VOTING gate (never stall on an absent human).
+    // Manual path: `auto` is false, so `effectiveForce === force` — byte-for-byte unchanged.
     const force = body.force === true;
+    const effectiveForce = force || auto;
 
     const playerId = getAuthedPlayerId(req, id);
     if (!playerId) {
@@ -50,7 +58,9 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }
 
-    if (room.hostPlayerId !== playerId) {
+    // Manual advance is host-only. Auto-advance is open to any member (re-validated in the mutator:
+    // membership + deadline). The signed seat cookie already proves room membership via getAuthedPlayerId.
+    if (!auto && room.hostPlayerId !== playerId) {
       return Response.json({ error: '只有房主可以推进阶段' }, { status: 403 });
     }
 
@@ -62,8 +72,21 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
     let revoteMessage: ChatMessage | null = null;
     let didRevote = false;
 
+    const now = Date.now();
     const updated = updateRoom(id, current => {
-      if (current.hostPlayerId !== playerId) {
+      if (auto) {
+        // F4-d auto-advance authorization: any room member may fire it, but ONLY once the persisted
+        // deadline has genuinely passed. Belt-and-suspenders membership check (the cookie already proves
+        // it). Multiple clients firing the timer collapse to a no-op via this + the C2 guard below.
+        if (!current.players.some(player => player.id === playerId)) {
+          failure = { status: 403, body: { error: '不是房间成员' } };
+          return null;
+        }
+        if (current.autoAdvance !== true || current.phaseDeadline === undefined || now < current.phaseDeadline) {
+          failure = { status: 409, body: { error: '未到自动推进时间', code: 'deadline_not_reached' } };
+          return null;
+        }
+      } else if (current.hostPlayerId !== playerId) {
         failure = { status: 403, body: { error: '只有房主可以推进阶段' } };
         return null;
       }
@@ -76,8 +99,8 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
 
       // C9: vote gate. In VOTING, distinguish "not everyone voted yet" (host can force) from a generic
       // "can't advance" so the UI can offer the force button.
-      if (!canAdvanceRoom(current, { force })) {
-        if (current.currentPhase === 'VOTING' && Object.keys(current.votes).length > 0 && !force) {
+      if (!canAdvanceRoom(current, { force: effectiveForce })) {
+        if (current.currentPhase === 'VOTING' && Object.keys(current.votes).length > 0 && !effectiveForce) {
           failure = { status: 400, body: { error: '还有玩家未投票（房主可强制推进）', code: 'awaiting_votes' } };
         } else {
           failure = { status: 400, body: { error: `当前阶段无法推进：${current.currentPhase}` } };
@@ -93,12 +116,13 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
           const revote = applyTieRevote(current);
           revoteMessage = revote.message;
           didRevote = true;
-          return revote.room;
+          // F4-d: a revote stays in VOTING but gets a FRESH deadline so the clock restarts.
+          return { ...revote.room, phaseDeadline: phaseDeadlineFor(revote.room, scenario, now) };
         }
       }
 
       // Normal advance: append the new phase's GM narration atomically with the phase change.
-      const advanced = advanceRoom(current, { force });
+      const advanced = advanceRoom(current, { force: effectiveForce });
       if (!advanced) {
         failure = { status: 400, body: { error: `当前阶段无法推进：${current.currentPhase}` } };
         return null;
@@ -110,7 +134,12 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
         timestamp: Date.now(),
       };
       narration = message;
-      return { ...advanced, groupChatHistory: [...advanced.groupChatHistory, message] };
+      // F4-d: stamp the new phase's deadline (undefined when auto-advance off or entering REVEAL).
+      return {
+        ...advanced,
+        groupChatHistory: [...advanced.groupChatHistory, message],
+        phaseDeadline: phaseDeadlineFor(advanced, scenario, now),
+      };
     });
 
     if (failure) {

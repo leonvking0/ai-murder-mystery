@@ -10,6 +10,12 @@ import { generatePublicId } from '@/lib/room/auth';
 import { connectedHumanVoteState, reassignHost, seatsToTakeOver } from '@/lib/scenarios/projection';
 import type { CharacterControl, Player, Room, Scenario } from '@/types/game';
 
+// F4-d: phaseDeadlineFor is a PURE helper, but it lives in projection.ts (the documented home for pure
+// room helpers) so the `--experimental-strip-types` test runner can load it — room-engine.ts pulls in an
+// @/-value chain (memory-manager → llm-provider) that runner can't resolve. Re-export it here so the
+// start/advance routes keep importing it from `@/lib/game-engine/room-engine` (their natural home).
+export { phaseDeadlineFor } from '@/lib/scenarios/projection';
+
 // D2: how long a human's seat may sit disconnected before an NPC takes it over and (if it was the
 // host's seat) the host role is handed off. Pinned at 90s — long enough to survive a refresh/reconnect,
 // short enough that the table isn't stuck waiting on someone who left.
