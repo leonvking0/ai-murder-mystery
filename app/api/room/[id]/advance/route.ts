@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { runNpcVoting } from '@/lib/agents/npc-voter';
-import { PHASE_NARRATIONS } from '@/lib/game-engine/phase-manager';
+import { narrationForPhase } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
 import { getScenarioById } from '@/lib/scenarios/registry';
 import { applyTieRevote, projectRoomForPlayer, tallyVotes } from '@/lib/scenarios/projection';
@@ -106,7 +106,7 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       const message: ChatMessage = {
         id: randomUUID(),
         role: 'system',
-        content: PHASE_NARRATIONS[advanced.currentPhase] ?? '',
+        content: narrationForPhase(advanced.currentPhase, scenario),
         timestamp: Date.now(),
       };
       narration = message;

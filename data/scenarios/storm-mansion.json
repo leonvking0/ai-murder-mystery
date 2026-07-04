@@ -656,5 +656,27 @@
       ],
       "isPublicKnowledge": true
     }
-  ]
+  ],
+  "narrations": {
+    "LOBBY": "角色已入场。请确认准备状态，接下来将进入阅读阶段。",
+    "READING": "暴风雪已封山。请阅读角色背景与当前局势，确认你掌握的信息边界。",
+    "INTRO": "请所有角色进行简短自我介绍，并说明昨夜的大致动向。",
+    "DISCUSSION_1": "第一轮讨论开始，优先围绕动机和不在场证明进行交叉质询。",
+    "INVESTIGATION_1": "第一轮搜证开始，你可以选择地点查找第一批线索。",
+    "DISCUSSION_2": "第二轮讨论开始，请结合新线索核对口供矛盾。",
+    "INVESTIGATION_2": "第二轮搜证开始，关键证据已开放，重点破解密室与毒物来源。",
+    "FINAL_DISCUSSION": "最终讨论开始，请整合完整时间线并锁定唯一怀疑对象。",
+    "VOTING": "最终指认开始：投票已开放，但在主持人推进前你仍可更改。请把握最后的申辩回合，完成质询与辩护，并给出完整证据链。",
+    "REVEAL": "真相揭晓阶段开始。GM将复盘作案过程与所有关键误导点。"
+  },
+  "phaseDurations": {
+    "READING": 5,
+    "INTRO": 3,
+    "DISCUSSION_1": 8,
+    "INVESTIGATION_1": 8,
+    "DISCUSSION_2": 8,
+    "INVESTIGATION_2": 8,
+    "FINAL_DISCUSSION": 10,
+    "VOTING": 5
+  }
 }

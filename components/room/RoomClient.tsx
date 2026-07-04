@@ -568,7 +568,11 @@ export function RoomClient({ code }: RoomClientProps) {
 
         {inProgress && (
           <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <PhaseIndicator phase={phase} sequence={view.room.phaseSequence} />
+            <PhaseIndicator
+              phase={phase}
+              sequence={view.room.phaseSequence}
+              suggestedDuration={view.scenario.phaseDurations?.[phase]}
+            />
             <Roster view={view} />
           </div>
         )}

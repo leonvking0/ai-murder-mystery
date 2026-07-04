@@ -7,9 +7,11 @@ interface PhaseIndicatorProps {
   phase: GamePhase;
   // F4-b: the room's phase walk (quick vs standard). Defaults to the standard sequence for back-compat.
   sequence?: GamePhase[];
+  // F4-c: scenario-authored suggested duration (minutes) for the current phase. Display only — no timer.
+  suggestedDuration?: number;
 }
 
-export function PhaseIndicator({ phase, sequence = PHASE_SEQUENCE }: PhaseIndicatorProps) {
+export function PhaseIndicator({ phase, sequence = PHASE_SEQUENCE, suggestedDuration }: PhaseIndicatorProps) {
   const currentIndex = Math.max(0, sequence.indexOf(phase));
   const progress = (currentIndex / (sequence.length - 1)) * 100;
   const config = getPhaseConfig(phase);
@@ -22,9 +24,16 @@ export function PhaseIndicator({ phase, sequence = PHASE_SEQUENCE }: PhaseIndica
           <h2 className="mt-1 text-lg font-semibold text-amber-100">{PHASE_LABELS[phase]}</h2>
           <p className="mt-1 text-sm text-slate-300">{config.description}</p>
         </div>
-        <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-3 py-1 text-xs text-amber-200">
-          {currentIndex + 1}/{sequence.length}
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="rounded-full border border-amber-500/40 bg-amber-600/20 px-3 py-1 text-xs text-amber-200">
+            {currentIndex + 1}/{sequence.length}
+          </span>
+          {suggestedDuration !== undefined && (
+            <span className="rounded-full border border-slate-600/60 bg-slate-800/60 px-3 py-1 text-xs text-slate-300">
+              建议时长 · {suggestedDuration} 分钟
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800">
