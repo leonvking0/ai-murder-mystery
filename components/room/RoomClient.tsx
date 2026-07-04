@@ -19,7 +19,7 @@ import {
 } from '@/components/room/RoomPanels';
 import { getNextPhase } from '@/lib/game-engine/phase-manager';
 import { getPlayerId, setPlayerId } from '@/lib/room/identity';
-import type { ChatMessage, ClueView, PlayerRoomView } from '@/types/game';
+import type { ChatMessage, ClueView, GamePhase, PlayerRoomView } from '@/types/game';
 
 interface RoomClientProps {
   code: string;
@@ -63,6 +63,13 @@ export function RoomClient({ code }: RoomClientProps) {
   const [npcNotice, setNpcNotice] = useState<string | null>(null);
   // C2: host "强制推进" affordance, revealed only after the server reports awaiting_votes.
   const [forceAdvance, setForceAdvance] = useState(false);
+
+  // F4-d: current wall-clock (ms), ticked each second while an auto-advance countdown is active, so the
+  // countdown re-renders and the deadline-passed trigger can fire.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  // F4-d: guard so the auto-advance POST fires at most once per (phase, deadline) — a fresh deadline
+  // (e.g. a tie-revote restarting the VOTING clock) produces a new key, so it may fire again.
+  const autoFiredKeyRef = useRef<string | null>(null);
 
   const playerIdRef = useRef<string | null>(null);
   playerIdRef.current = playerId;
@@ -432,6 +439,51 @@ export function RoomClient({ code }: RoomClientProps) {
     }
   };
 
+  // F4-d: fire the deadline-based auto-advance. Any member's tab may call it (cooperative); the server
+  // re-validates (member + deadline passed) and 409s duplicates. Benign races (deadline_not_reached /
+  // stale_phase — another tab already advanced) resync silently; other errors are swallowed (background).
+  const triggerAutoAdvance = useCallback(
+    async (phase: GamePhase) => {
+      const result = await actionRaw('advance', { auto: true, expectedPhase: phase });
+      if (!result) {
+        return;
+      }
+      if (result.ok) {
+        await refetchState();
+      } else if (result.data?.code === 'deadline_not_reached' || result.data?.code === 'stale_phase') {
+        await refetchState();
+      }
+    },
+    [actionRaw, refetchState],
+  );
+
+  // F4-d: while a countdown is live, tick `nowMs` each second (so the countdown re-renders) and, once the
+  // deadline passes, fire the auto-advance exactly once per (phase, deadline). Cleared on unmount / when
+  // auto-advance is off / at REVEAL / on phase change.
+  const autoAdvanceOn = view?.room.autoAdvance === true;
+  const phaseDeadline = view?.room.phaseDeadline;
+  const currentPhase = view?.room.currentPhase;
+  const isInProgress = view?.room.status === 'in_progress';
+  useEffect(() => {
+    if (!isInProgress || !autoAdvanceOn || phaseDeadline === undefined || currentPhase === 'REVEAL') {
+      return;
+    }
+    const tick = () => {
+      const t = Date.now();
+      setNowMs(t);
+      if (t >= phaseDeadline && currentPhase) {
+        const key = `${currentPhase}:${phaseDeadline}`;
+        if (autoFiredKeyRef.current !== key) {
+          autoFiredKeyRef.current = key;
+          void triggerAutoAdvance(currentPhase);
+        }
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [isInProgress, autoAdvanceOn, phaseDeadline, currentPhase, triggerAutoAdvance]);
+
   const doKick = async (publicId: string) => {
     setError(null);
     try {
@@ -568,11 +620,18 @@ export function RoomClient({ code }: RoomClientProps) {
 
         {inProgress && (
           <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <PhaseIndicator
-              phase={phase}
-              sequence={view.room.phaseSequence}
-              suggestedDuration={view.scenario.phaseDurations?.[phase]}
-            />
+            <div>
+              <PhaseIndicator
+                phase={phase}
+                sequence={view.room.phaseSequence}
+                suggestedDuration={view.scenario.phaseDurations?.[phase]}
+              />
+              {view.room.autoAdvance && view.room.phaseDeadline !== undefined && phase !== 'REVEAL' && (
+                <p className="mt-2 text-xs text-amber-300/90">
+                  ⏱ 自动推进 · 剩 {formatCountdown(view.room.phaseDeadline - nowMs)}
+                </p>
+              )}
+            </div>
             <Roster view={view} />
           </div>
         )}
@@ -682,6 +741,14 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       {children}
     </button>
   );
+}
+
+// F4-d: format a remaining-ms duration as M:SS (clamped at 0, never negative).
+function formatCountdown(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

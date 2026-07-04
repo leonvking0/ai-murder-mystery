@@ -10,7 +10,10 @@
 // VALUE imports must use relative `.ts` paths — the `@/` alias resolves only for `import type`.
 import { resolveFlow, FLOWS, FLOW_LABELS } from '../lib/game-engine/flow.ts';
 import { getNextPhase, roundForPhase, PHASE_SEQUENCE } from '../lib/game-engine/phase-manager.ts';
-import type { GamePhase } from '@/types/game';
+// F4-d: phaseDeadlineFor is a pure helper defined in projection.ts (strip-types loadable) and re-exported
+// from room-engine.ts for the routes; import it here from projection.ts, which the runner CAN load.
+import { phaseDeadlineFor } from '../lib/scenarios/projection.ts';
+import type { GamePhase, Room, Scenario } from '@/types/game';
 
 let pass = 0;
 let fail = 0;
@@ -116,6 +119,50 @@ check('getNextPhase(INVESTIGATION_2, quick) → null (absent from quick)', getNe
 // FLOW_LABELS covers both presets.
 check('FLOW_LABELS has a standard entry', typeof FLOW_LABELS.standard?.title === 'string' && typeof FLOW_LABELS.standard?.description === 'string');
 check('FLOW_LABELS has a quick entry', typeof FLOW_LABELS.quick?.title === 'string' && typeof FLOW_LABELS.quick?.description === 'string');
+
+// ---- F4-d: phaseDeadlineFor (opt-in auto-advance deadline) ----
+console.log('\nAuto-advance deadline — phaseDeadlineFor (F4-d):');
+
+const NOW = 1_000_000;
+function makeRoom(autoAdvance: boolean, currentPhase: GamePhase): Room {
+  return { autoAdvance, currentPhase } as unknown as Room;
+}
+// Minimal scenario: only phaseDurations matters to the helper. READING/VOTING have durations; INTRO does not.
+const durScenario = { phaseDurations: { READING: 5, VOTING: 3, BAD: 0 } } as unknown as Scenario;
+
+check(
+  'phaseDeadlineFor: autoAdvance:false → undefined regardless of durations',
+  phaseDeadlineFor(makeRoom(false, 'READING'), durScenario, NOW) === undefined,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + phase with duration → now + minutes*60000',
+  phaseDeadlineFor(makeRoom(true, 'READING'), durScenario, NOW) === NOW + 5 * 60_000,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + VOTING (has duration) → now + 3min',
+  phaseDeadlineFor(makeRoom(true, 'VOTING'), durScenario, NOW) === NOW + 3 * 60_000,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + REVEAL (terminal) → undefined',
+  phaseDeadlineFor(makeRoom(true, 'REVEAL'), durScenario, NOW) === undefined,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + phase absent from phaseDurations → undefined',
+  phaseDeadlineFor(makeRoom(true, 'INTRO'), durScenario, NOW) === undefined,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + non-positive duration → undefined',
+  phaseDeadlineFor(makeRoom(true, 'BAD' as GamePhase), durScenario, NOW) === undefined,
+);
+check(
+  'phaseDeadlineFor: autoAdvance:true + scenario without phaseDurations → undefined',
+  phaseDeadlineFor(makeRoom(true, 'READING'), {} as unknown as Scenario, NOW) === undefined,
+);
+
+// The auto path relies on advanceRoom(room, { force: true }) still transitioning correctly. room-engine
+// isn't strip-types loadable, but getNextPhase (the transition core advanceRoom composes) is covered
+// above (VOTING → REVEAL etc.), so the forced VOTING→REVEAL walk the auto path depends on is validated.
+check('auto path relies on VOTING → REVEAL transition (covered above)', getNextPhase('VOTING') === 'REVEAL');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

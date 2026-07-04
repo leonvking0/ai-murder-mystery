@@ -194,6 +194,9 @@ export function projectRoomForPlayer(
       // F4-b: public game structure (which phases, in what order) so the client renders the right
       // number of progress steps for quick vs standard. NOT a secret. Defaults to the standard walk.
       phaseSequence: room.phaseSequence ?? FLOWS.standard,
+      // F4-d: public auto-advance flag + current-phase deadline (a countdown is not secret).
+      autoAdvance: room.autoAdvance,
+      phaseDeadline: room.phaseDeadline,
       // Publish the host's non-secret render id, never their real `hostPlayerId` (KI-034 leak fix).
       hostPublicId: room.players.find(player => player.id === room.hostPlayerId)?.publicId ?? '',
       players: room.players.map(player => toPublicPlayer(player, playerId, room.characterControl)),
@@ -217,6 +220,34 @@ export function projectRoomForPlayer(
     yourCharacter,
     reveal: isReveal ? buildReveal(room, scenario, playerId) : undefined,
   };
+}
+
+// ---- F4-d auto-advance deadline helper (pure) ----
+//
+// Lives here (not room-engine.ts) for the same reason as the voting/D2 helpers below: this module is
+// loadable under `--experimental-strip-types` (relative/type-only value imports only), room-engine.ts is
+// not. room-engine.ts re-exports this so the start/advance routes import it from `@/lib/game-engine/room-engine`.
+
+/**
+ * Compute the epoch-ms deadline at which the room's CURRENT phase may auto-advance, or undefined when no
+ * deadline applies. Reads `room.currentPhase`, so call it AFTER a phase transition on the NEW room.
+ * Returns `now + minutes*60_000` only when ALL of: auto-advance is opted-in (`room.autoAdvance === true`),
+ * the current phase has a positive scenario-authored duration, and the phase is not terminal (REVEAL).
+ * Otherwise undefined (auto-advance off, terminal REVEAL, phase absent from phaseDurations, or a
+ * non-positive duration).
+ */
+export function phaseDeadlineFor(room: Room, scenario: Scenario, now: number): number | undefined {
+  if (room.autoAdvance !== true) {
+    return undefined;
+  }
+  if (room.currentPhase === 'REVEAL') {
+    return undefined;
+  }
+  const minutes = scenario.phaseDurations?.[room.currentPhase];
+  if (typeof minutes !== 'number' || minutes <= 0) {
+    return undefined;
+  }
+  return now + minutes * 60_000;
 }
 
 // ---- Voting helpers (pure; shared by buildReveal, the advance route, and room-engine's VOTING gate) ----
