@@ -1,4 +1,4 @@
-import type { GamePhase } from '@/types/game';
+import type { GamePhase, Scenario } from '@/types/game';
 
 // Relative + explicit `.ts` so the strip-types test runner (which loads this module) resolves this
 // value import at runtime — `@/` aliases resolve only for `import type` there.
@@ -28,18 +28,29 @@ export const PHASE_LABELS: Record<GamePhase, string> = {
   REVEAL: '真相揭晓',
 };
 
+// Scenario-NEUTRAL generic defaults (F4-c). These are the fallback GM narrations for ANY scenario that
+// does not author its own `narrations`. Per-scenario flavor (e.g. storm-mansion's "暴风雪"/"密室"/"毒物"
+// text) now lives in that scenario's JSON `narrations` map — see narrationForPhase below. Keep this map
+// generic: no scenario-specific words.
 export const PHASE_NARRATIONS: Record<GamePhase, string> = {
   LOBBY: '角色已入场。请确认准备状态，接下来将进入阅读阶段。',
-  READING: '暴风雪已封山。请阅读角色背景与当前局势，确认你掌握的信息边界。',
+  READING: '请阅读你的角色背景与当前局势，确认你掌握的信息边界。',
   INTRO: '请所有角色进行简短自我介绍，并说明昨夜的大致动向。',
   DISCUSSION_1: '第一轮讨论开始，优先围绕动机和不在场证明进行交叉质询。',
   INVESTIGATION_1: '第一轮搜证开始，你可以选择地点查找第一批线索。',
   DISCUSSION_2: '第二轮讨论开始，请结合新线索核对口供矛盾。',
-  INVESTIGATION_2: '第二轮搜证开始，关键证据已开放，重点破解密室与毒物来源。',
+  INVESTIGATION_2: '第二轮搜证开始，关键证据已开放，请重点核对矛盾与作案手法。',
   FINAL_DISCUSSION: '最终讨论开始，请整合完整时间线并锁定唯一怀疑对象。',
   VOTING: '最终指认开始：投票已开放，但在主持人推进前你仍可更改。请把握最后的申辩回合，完成质询与辩护，并给出完整证据链。',
   REVEAL: '真相揭晓阶段开始。GM将复盘作案过程与所有关键误导点。',
 };
+
+// Resolve the GM narration for a phase: a scenario's own authored narration wins, else the generic
+// default, else empty string. Scenario is passed in (no value import of a `@/` module into this
+// test-loaded module — type-only import keeps the strip-types runner happy).
+export function narrationForPhase(phase: GamePhase, scenario: Scenario): string {
+  return scenario.narrations?.[phase] ?? PHASE_NARRATIONS[phase] ?? '';
+}
 
 const PHASE_CONFIGS: Record<GamePhase, PhaseCapabilityConfig> = {
   LOBBY: {

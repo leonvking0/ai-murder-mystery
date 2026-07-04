@@ -16,7 +16,9 @@ delete process.env.ANTHROPIC_API_KEY;
 import type { Character, CharacterMemory, GamePhase, Room, Scenario, SuspicionRecord } from '@/types/game';
 import type { GroupResponseDeps, NpcTurnEvent } from '../lib/agents/room-group-chat.ts';
 
-const { getPhaseConfig } = await import('../lib/game-engine/phase-manager.ts');
+import stormMansionRaw from '../data/scenarios/storm-mansion.json' with { type: 'json' };
+
+const { getPhaseConfig, narrationForPhase, PHASE_NARRATIONS } = await import('../lib/game-engine/phase-manager.ts');
 const { computeNpcVote, tryReserveNpcTrigger } = await import('../lib/agents/npc-voter.ts');
 // room-group-chat is deliberately strip-types-loadable (it lazy-imports npc-agent), so we can drive
 // the group-turn generator offline. No LLM is configured here (keys deleted above), so the default
@@ -422,6 +424,33 @@ const nudgeEvents = await collectTurn(manageRoomGroupResponse(freshGroupRoom(), 
 check('nudge: empty-triggerText self-prompt still yields a start', nudgeEvents.some(event => event.kind === 'start'));
 check('nudge: empty-triggerText self-prompt still yields a terminal done', nudgeEvents.some(event => event.kind === 'done'));
 check('nudge: the self-prompt path emits no error', nudgeEvents.every(event => event.kind !== 'error'));
+
+// F4-c: scenario-driven GM narration. A scenario's own `narrations` win over the generic defaults;
+// scenarios without `narrations` fall back to PHASE_NARRATIONS; and the defaults are now scenario-neutral.
+console.log('F4-c GM narration (narrationForPhase + neutral defaults):');
+const stormScenario = stormMansionRaw as unknown as Scenario;
+check(
+  'narrationForPhase: storm-mansion INVESTIGATION_2 uses its own narration (contains 毒物)',
+  narrationForPhase('INVESTIGATION_2', stormScenario).includes('毒物'),
+);
+check(
+  'narrationForPhase: storm-mansion narration matches the scenario override verbatim',
+  narrationForPhase('READING', stormScenario) === stormScenario.narrations?.READING,
+);
+const noNarrationScenario = { ...stormScenario, narrations: undefined } as Scenario;
+check(
+  'narrationForPhase: a scenario with no narrations falls back to the generic PHASE_NARRATIONS',
+  narrationForPhase('INVESTIGATION_2', noNarrationScenario) === PHASE_NARRATIONS.INVESTIGATION_2,
+);
+check(
+  'narrationForPhase: fallback default is scenario-neutral (no storm-specific 毒物/密室/暴风雪)',
+  !narrationForPhase('INVESTIGATION_2', noNarrationScenario).match(/毒物|密室|暴风雪/),
+);
+const genericJoined = Object.values(PHASE_NARRATIONS).join('');
+check(
+  'PHASE_NARRATIONS defaults contain no storm-specific words (暴风雪/密室)',
+  !genericJoined.includes('暴风雪') && !genericJoined.includes('密室'),
+);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

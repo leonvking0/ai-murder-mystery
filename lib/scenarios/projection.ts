@@ -89,6 +89,9 @@ export function toScenarioPublic(scenario: Scenario): ScenarioPublic {
       image: location.image,
     })),
     timeline: scenario.timeline.filter(event => event.isPublicKnowledge),
+    // F4-c: per-phase suggested durations are public (display only). Narration is NOT projected here —
+    // it is delivered server-side as the GM chat message on advance.
+    phaseDurations: scenario.phaseDurations,
   };
 }
 

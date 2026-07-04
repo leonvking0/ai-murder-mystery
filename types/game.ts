@@ -17,6 +17,12 @@ export interface Scenario {
   locations: InvestigationLocation[];
   phases: PhaseConfig[];
   timeline: TimelineEvent[];
+
+  // F4-c: scenario-authored GM narration per phase (keyed by GamePhase). Falls back to the generic
+  // PHASE_NARRATIONS defaults when a phase is absent. Public game text — safe to project.
+  narrations?: Partial<Record<GamePhase, string>>;
+  // F4-c: per-phase suggested duration in minutes (display only — no auto-advance). Public structure.
+  phaseDurations?: Partial<Record<GamePhase, number>>;
 }
 
 export interface ScenarioSetting {
@@ -333,6 +339,8 @@ export interface ScenarioPublic {
   characters: CharacterPublic[];
   locations: LocationPublic[];
   timeline: TimelineEvent[]; // public-knowledge events only
+  // F4-c: per-phase suggested duration in minutes (display only). Public — not secret.
+  phaseDurations?: Partial<Record<GamePhase, number>>;
 }
 
 export interface PublicPlayer {
