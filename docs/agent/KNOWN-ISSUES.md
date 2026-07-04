@@ -284,9 +284,10 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
   `Room.phaseSequence` stamped at `createRoom`; `getNextPhase(current, sequence)` is parametrized. The round
   map is now a single `PHASE_ROUND` source of truth + exported `roundForPhase`; the duplicate + the dead
   `canAdvance(session)` were deleted. F4-b (PR #34) added the selectable `quick` flow and a flow-aware
-  investigation ceiling. **Still not read: `scenario.phases` `gmScript`/`duration`** — scenario-driven
-  narration override + per-phase durations/auto-advance are deferred to **F4-c** (see BACKLOG); `PHASE_NARRATIONS`
-  defaults (keyed by phase) still drive GM text.
+  investigation ceiling. **F4-c (PR #36)** finished it: `Scenario.narrations` (keyed by GamePhase) + `narrationForPhase`
+  (scenario override ?? scenario-neutral default; storm flavor moved verbatim into `storm-mansion.json`), plus
+  `Scenario.phaseDurations` display. **F4-d (PR #38)** added opt-in deadline-based auto-advance. Fully closed — the legacy
+  positional `scenario.phases`/`gmScript` array is now the only dead remnant (superseded by the keyed `narrations`).
 
 ### KI-033 · `AGENTS.md` tech stack is stale and will mislead agents · maintainability/nit · ✅ fixed (PR #25 / E7)
 - **Where:** `AGENTS.md:13-16` still says `@anthropic-ai/sdk` + SQLite/Drizzle; the code uses the Vercel
@@ -502,9 +503,9 @@ The `isKiller` lookup already covers it; drop the hardcoded fallback. (Also a KI
 - **KI-056** (= KI-028) ✅ fixed (PR #22 / E3) `validateScenario` now enforces exactly-one-killer, integer
   `availableInRound` ≥ 1, and relationship `characterId` referential integrity; clue-id uniqueness + acyclic
   prereqs were already added by D6. Covered by `tests/scenario-validation.test.ts` (`schema.ts`).
-- **KI-057** (= KI-032) ✅ round-map dedup + flow data-ization done (F4-a/F4-b, PRs #33/#34). Remaining:
-  phase GM text still uses `PHASE_NARRATIONS` defaults, not `scenario.phases.gmScript` → scenario-driven
-  narration deferred to **F4-c**.
+- **KI-057** (= KI-032) ✅ fully closed. Round-map dedup + flow data-ization (F4-a/F4-b, #33/#34) + scenario-driven GM
+  narration (F4-c, #36: `narrationForPhase`, storm flavor moved into the scenario, defaults now neutral). GM text is no
+  longer hardcoded storm-mansion flavor.
 - **KI-058** (= KI-016) ✅ fixed (Batch C, PR #10) shared NPC memory is compacted via `summarizeConversations`
   past 20 entries (`compactConversationsIfNeeded`), and private-chat truncates the model input to the last 16;
   confirmed still resolved during Batch E (E4 was the token cap only) (`memory-manager.ts`, chat routes).
