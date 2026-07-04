@@ -11,7 +11,7 @@ import { dirname } from 'node:path';
 import { generatePublicId } from '../room/auth.ts';
 import { resolveFlow } from '../game-engine/flow.ts';
 import type { FlowId } from '../game-engine/flow.ts';
-import type { Player, Room, RoomStatus } from '@/types/game';
+import type { Player, Room, RoomStatus, Scenario } from '@/types/game';
 
 // Survive Next dev HMR (module reloads) by hanging the db handle off globalThis, mirroring the emitter
 // registry in lib/realtime/room-bus.ts. Without this, each HMR reload leaks an unclosed better-sqlite3
@@ -131,6 +131,10 @@ export interface CreateRoomInput {
   // F4-d: opt in to deadline-based auto-advance (default false). No phaseDeadline is set at LOBBY; the
   // host still starts the game deliberately, and deadlines are stamped on each in-game phase entry.
   autoAdvance?: boolean;
+  // F2-tail (UGC): the full imported scenario (incl. secrets) to store on the room. SERVER-ONLY.
+  // Undefined for built-in rooms. For custom rooms the caller passes the scenario's own id as
+  // `scenarioId` so labels/cards still resolve.
+  customScenario?: Scenario;
 }
 
 export function createRoom(input: CreateRoomInput): Room {
@@ -153,6 +157,9 @@ export function createRoom(input: CreateRoomInput): Room {
     round: 1,
     phaseSequence: resolveFlow(input.flowId),
     autoAdvance: input.autoAdvance === true,
+    // F2-tail (UGC): server-only; undefined for built-in rooms. persist() JSON-serializes the whole
+    // room (no field allowlist), so this round-trips through parseRow automatically.
+    customScenario: input.customScenario,
     hostPlayerId: hostPlayer.id,
     players: [hostPlayer],
     characterControl: {},

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { runNpcVoting } from '@/lib/agents/npc-voter';
 import { narrationForPhase } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
-import { getScenarioById } from '@/lib/scenarios/registry';
+import { getRoomScenario } from '@/lib/scenarios/registry';
 import { applyTieRevote, projectRoomForPlayer, tallyVotes } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { advanceRoom, canAdvanceRoom, phaseDeadlineFor } from '@/lib/game-engine/room-engine';
@@ -53,7 +53,7 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Room not found' }, { status: 404 });
     }
 
-    const scenario = getScenarioById(room.scenarioId);
+    const scenario = getRoomScenario(room);
     if (!scenario) {
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }

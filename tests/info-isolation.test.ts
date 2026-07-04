@@ -102,6 +102,25 @@ check('no reveal payload pre-reveal', view.reveal === undefined);
 const reveal = projectRoomForPlayer({ ...playing, currentPhase: 'REVEAL' }, scenario, playerId)!;
 check('REVEAL exposes truth + killer id', reveal.reveal?.truth === 'SECRET-TRUTH' && reveal.reveal?.killerCharacterId === 'killer');
 
+console.log('F2-tail UGC custom-scenario room projects with the SAME isolation (customScenario is server-only):');
+// A room that imported a custom scenario stores the FULL object (incl. secrets) on room.customScenario.
+// The projection resolves the scenario via getRoomScenario at the ROUTE (passed in as `scenario` here) and
+// builds the view field-by-field — it NEVER spreads `room`, so customScenario must not appear in the view,
+// and a custom-scenario room must leak no more than a built-in one. Requester plays 'killer', so their OWN
+// SECRET-SCRIPT-K legitimately appears in yourCharacter — assert on the secrets that must NEVER leak.
+const customRoom = {
+  ...playing,
+  customScenario: scenario, // server-only: the full imported scenario, carrying every secret
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+const customView = projectRoomForPlayer(customRoom, scenario, playerId)!;
+const customBlob = JSON.stringify(customView);
+check('UGC: customScenario (the server-only imported object) never appears in the projection', !customBlob.includes('customScenario'));
+check('UGC: another character private script never leaks from a custom-scenario room', !customBlob.includes('SECRET-SCRIPT-O'));
+check('UGC: case.truth never leaks from a custom-scenario room pre-reveal', !customBlob.includes('SECRET-TRUTH'));
+check('UGC: clue.significance never leaks from a custom-scenario room', !customBlob.includes('SECRET-SIGNIFICANCE'));
+check('UGC: the requester still sees their OWN character private script (same as a built-in room)', customView.yourCharacter?.privateScript === 'SECRET-SCRIPT-K');
+
 console.log('Projected roster hides real player ids (KI-034):');
 // Two-member room: Alice (host) requests /state; Bob is the other player.
 const twoPlayerRoom = {

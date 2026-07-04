@@ -1,5 +1,5 @@
 import { getAuthedPlayerId } from '@/lib/room/auth';
-import { getScenarioById } from '@/lib/scenarios/registry';
+import { getRoomScenario } from '@/lib/scenarios/registry';
 import { projectRoomForPlayer } from '@/lib/scenarios/projection';
 import { getRoom } from '@/lib/store/rooms';
 
@@ -23,7 +23,7 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
       return Response.json({ error: 'Room not found' }, { status: 404 });
     }
 
-    const scenario = getScenarioById(room.scenarioId);
+    const scenario = getRoomScenario(room);
     if (!scenario) {
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }
