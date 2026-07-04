@@ -323,3 +323,45 @@ quick `[I1]` → I1 is last → max=2, so all clues stay reachable. Proven by `t
 `INVESTIGATION_BUDGET` is unchanged, so quick = one investigation phase = fewer total searches — an intended
 depth/time tradeoff, not a solvability blocker). Any future flow with a different investigation-phase count
 inherits solvability for free.
+
+## 2026-07-04 — GM narration is scenario-authored (keyed by GamePhase), defaults are scenario-neutral — Accepted
+**Context (F4-c):** `PHASE_NARRATIONS` held storm-mansion-flavored text ("暴风雪已封山", "破解密室与毒物来源") yet was
+the generic default for every scenario — the visible half of KI-032/KI-057. The legacy `scenario.phases[]` array
+carried positional `gmScript`, but positional mapping is fragile once flows vary (quick drops phases).
+**Decision:** Add `Scenario.narrations?: Partial<Record<GamePhase, string>>` — an EXPLICIT phase-keyed map, not the
+positional `phases[]` — and `narrationForPhase(phase, scenario) = scenario.narrations?.[phase] ?? PHASE_NARRATIONS[phase]`.
+Rewrite `PHASE_NARRATIONS` scenario-neutral; move storm-mansion's flavor verbatim into its JSON `narrations`. Net:
+storm GM text is byte-identical (now sourced from the scenario), every other/future scenario gets clean defaults.
+`phaseDurations` follows the same keyed pattern (display-only chip). The positional `scenario.phases[]` stays as dead
+legacy (superseded).
+**Consequences:** Narration is delivered server-side as the GM chat message (not projected as scenario data); only the
+public `phaseDurations` rides the projection. New scenarios author their own phase text without engine changes.
+
+## 2026-07-04 — Auto-advance is a persisted deadline + client trigger, not a server timer — Accepted
+**Context (F4-d):** Async play / no-host-offline-stall wants phases to advance on a clock. A server-side setTimeout per
+room is lost on restart and adds stateful infra; it also collides with the D2 disconnect/host-handoff logic.
+**Decision:** Opt-in per room (`Room.autoAdvance`). On each phase entry the server stamps a PERSISTED
+`Room.phaseDeadline = now + phaseDurations[phase]` (pure `phaseDeadlineFor`; undefined when off / at REVEAL / no
+duration). No server timer: the client shows a countdown and, once the deadline passes, POSTs `advance {auto:true}`;
+ANY member's tab may fire it (cooperative), and the server re-validates `autoAdvance && now >= phaseDeadline` inside the
+atomic mutator, applying **force semantics** so VOTING never stalls on an absent human (NPC votes keep ≥1 vote; a tie
+still triggers the single revote + resets the deadline). C2's `expectedPhase` guard collapses concurrent client triggers
+to one. Restart-tolerant because the deadline is state, not a live timer.
+**Consequences:** The manual host-only advance path is byte-for-byte unchanged (auto is purely additive authority gated
+on the deadline). `autoAdvance`/`phaseDeadline` are public (a countdown). A member can only advance what the deadline
+already permits — no early-advance grief.
+
+## 2026-07-04 — Custom (UGC) scenarios live on the room, gated by an offline solvability analyzer — Accepted
+**Context (F2-tail):** To let hosts bring their own scenarios we need somewhere to put an imported scenario and a way to
+reject broken ones. A global mutable registry means shared state, HMR hazards, cross-room bleed, and orphan persistence.
+**Decision:** Two parts. (1) `lib/scenarios/solvability.ts` — a pure, LLM-free `analyzeSolvability`/`analyzeAllFlows`
+that proves a scenario is *winnable* under every shipped flow (clue reachability within the flow's investigation ceiling,
+prereq round-monotonicity, exactly-one-killer, no dangling relationship/timeline refs), complementing `validateScenario`
+(which only proves well-formedness). (2) The full imported scenario is stored ON THE ROOM (`Room.customScenario`), NOT in
+a registry; every route resolves via `getRoomScenario(room) = room.customScenario ?? getScenarioById(room.scenarioId)`.
+Import happens at room creation: 256KB cap → `validateScenario` → `analyzeAllFlows` gate (reject unsolvable) → store.
+**Consequences:** `customScenario` carries secrets but is SERVER-ONLY — it resolves through the same per-player
+`projectRoomForPlayer` as built-ins (which builds the view field-by-field, never spreads `room`), so isolation is
+identical and was runtime-probed + regression-tested. Custom scenarios are self-contained, GC'd with the room (TTL), and
+can't pollute the built-in catalog. Built-in rooms are byte-for-byte unchanged (customScenario undefined → registry
+fallback). This is the safety gate any future LLM-generated content must also pass.

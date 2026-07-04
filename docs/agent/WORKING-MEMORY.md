@@ -2,7 +2,38 @@
 
 > Scratch state for the *current* phase of work. Rewrite freely. "Where we are right now."
 
-## Snapshot — 2026-07-03 (latest) — F4 flow data-ization (a+b) MERGED
+## Snapshot — 2026-07-04 (latest) — Batch F finished (all tractable): F4-c/d + F2 solvability + UGC import MERGED
+
+**State:** Green on `main` @ `b2475cc`. `npm test` = **365 checks** (info-isolation 128 + gameplay-chat 56 +
+gameplay-reveal 98 + scenario-validation 7 + flow 49 + gameplay-investigation 7 + solvability 20), tsc/eslint clean,
+Turbopack build ✓ Compiled. Worktrees cleaned; no in-flight work.
+
+**What landed this session (4 PRs, opus workers in worktrees, orchestrator audited every diff + ran the authoritative
+build on main + squash-merged; F4-c ‖ solvability ran in parallel, F4-d then UGC sequential — page.tsx/types overlap):**
+- **PR #36 (F4-c)** — scenario-driven GM narration: `Scenario.narrations` (keyed by GamePhase) + `narrationForPhase`;
+  `PHASE_NARRATIONS` rewritten scenario-NEUTRAL, storm flavor moved verbatim into `storm-mansion.json` (GM text
+  byte-identical). `Scenario.phaseDurations` → public projection → `PhaseIndicator` "建议时长" chip. Closes KI-032/057.
+- **PR #37 (F2 solvability)** — `lib/scenarios/solvability.ts` (pure, LLM-free): `analyzeSolvability`/`analyzeAllFlows`
+  prove a scenario is *winnable* per flow (clue reachability, prereq round-monotonicity, killer well-defined, dangling
+  refs). Real storm-mansion solvable under standard+quick, 0 issues. The safety gate for generated/UGC content.
+- **PR #38 (F4-d)** — opt-in deadline-based auto-advance: `Room.autoAdvance` + persisted `Room.phaseDeadline`
+  (`phaseDeadlineFor`); client countdown → POSTs `advance {auto:true}` past deadline; server re-validates
+  `autoAdvance && now>=deadline` with force semantics. No server timers (restart-tolerant). Manual path unchanged.
+- **PR #39 (F2 UGC import)** — host imports custom scenario JSON at room creation: 256KB cap + `validateScenario` +
+  `analyzeAllFlows` gate → stored server-only on `room.customScenario`, resolved everywhere via `getRoomScenario`,
+  projected with IDENTICAL per-player isolation (runtime-probed: no customScenario/truth/other-script/significance leak).
+
+**Isolation audits (all passed):** F4-c narration server-side only (phaseDurations public); F4-d autoAdvance/phaseDeadline
+public (countdown); UGC customScenario SERVER-ONLY — verified a custom-scenario room leaks no more than a built-in one.
+
+**Batch F remaining = BLOCKED, not tractable this session:** LLM-assisted scenario generation (no live model key in env),
+a hand-authored scenario matrix (creative content), random-killer variants (unsound without regeneration). All the
+*engineering* scaffolding they'd use — multi-scenario registry, `resolveFlow`, the per-flow solvability gate, the UGC
+import path — is in place. Also still open before public hosting: **KI-023** (rate-limit/auth breadth).
+
+---
+
+## Snapshot — 2026-07-03 (earlier) — F4 flow data-ization (a+b) MERGED
 
 **State:** Green on `main` @ `43944da`. `npm test` = **327 checks** (info-isolation 123 + gameplay-chat 51 +
 gameplay-reveal 98 + scenario-validation 7 + **flow 41** + **gameplay-investigation 7**), tsc/eslint clean,

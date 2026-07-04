@@ -11,13 +11,15 @@
   gameplay wins *are* the bug fix (e.g. B1 closes KI-036, B3 closes KI-037). Do the shared item once.
 - Suggested sequence: **A (block/security) → B (min gameplay loop) → C (robustness) → D/E (depth) → F (content/reach)**.
 
-> **Status 2026-07-03:** ✅ **Batches A–E DONE; Batch F IN PROGRESS** — F1, F2 (step 1), F3, F5, **F4 (a+b)** landed,
-> plus a security fix (**KI-066**) found during F5 pre-flight. A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**;
-> **E via #21–#25**; **F1/F2-picker/F3 via #26–#28**; **KI-066 via #30**; **F5 via #31**; **F4-a via #33**; **F4-b via #34**.
-> Test suite 22 → 90 → 156 → 261 → 268 → 279 → 307 → **327 checks** (added `tests/flow.test.ts` +41 and
-> `tests/gameplay-investigation.test.ts` +7). tsc/eslint/Turbopack build green.
-> **Remaining in F: F4-c (flow pacing/auto-advance + scenario narration — own wave) and F2 advanced
-> (random-killer variants, LLM-gen, UGC — the "L total" tail).**
+> **Status 2026-07-04:** ✅ **Batches A–E DONE; Batch F all-but-content DONE** — F1, F2 (picker + solvability + UGC import),
+> F3, **F4 (a/b/c/d)**, F5 landed, plus KI-066. A+B via PRs #2–#6; C via #7–#11; **D via #12–#19**; **E via #21–#25**;
+> **F1/F2-picker/F3 #26–#28**; **KI-066 #30**; **F5 #31**; **F4-a #33**; **F4-b #34**; **F4-c #36**; **F2-solvability #37**;
+> **F4-d #38**; **F2-UGC-import #39**. Test suite 22 → … → 327 → 332 → 352 → 360 → **365 checks**
+> (`tests/flow.test.ts` 49, `tests/gameplay-investigation.test.ts` 7, `tests/solvability.test.ts` 20, UGC isolation +5).
+> tsc/eslint/Turbopack build green.
+> **Remaining in F (blocked, not tractable without a live model key / creative authoring): LLM-assisted scenario
+> generation + a hand-authored scenario matrix + random-killer variants.** All engineering scaffolding they need
+> (multi-scenario registry, `resolveFlow`, per-flow **solvability gate**, UGC import path) is in place.
 > Deferred follow-ups still open: first-come-exclusive private clues (part of C8); signed reconnect cookie to
 > rebind a seat (part of C5/D2); the compaction read-modify-write vs a concurrent `present-clue` is a narrow,
 > self-healing race (accepted). (KI-059 provider/key mismatch was closed in Batch E / PR #23; the genuinely
@@ -159,11 +161,15 @@
   "DM" initial), KI-031 (clock skew now owned by 王大明 via a new 23:00 timeline event + script + clue significance),
   plus the content-lows (empty-tray folded into the 23:50 sighting, 十二年→近十年, killer cover-story guidance,
   footprints re-tied to the 22:40 tryst, recorder clue explained). **File:** `data/scenarios/storm-mansion.json`. — **M**
-- [~] **F2 · Content supply pipeline** — **step 1 done** ✅ PR #26: `GET /api/scenarios` + `toScenarioCard` /
-  `listScenarioCards` + home scenario picker (wires the already-built multi-scenario registry; card is public
-  metadata only). **Still open (the "L total" tail):** same-scenario random-killer variants; LLM-assisted
-  generation with an "auto-solve" regression; a scenario matrix (6-7 player, short, varied genres); JSON-import
-  UGC. **Files:** `registry.ts`, `page.tsx`, `types/game.ts`, new `app/api/scenarios/route.ts`. — **S done, L remains**
+- [~] **F2 · Content supply pipeline** — **picker (PR #26) + solvability analyzer (PR #37) + UGC import (PR #39) done.**
+  Home scenario picker (`GET /api/scenarios` + `toScenarioCard`); offline **solvability analyzer** (`lib/scenarios/solvability.ts`
+  — `analyzeSolvability`/`analyzeAllFlows`: clue reachability per flow, prereq round-monotonicity, killer well-defined,
+  dangling ref checks; the safety gate for generated/UGC content); **UGC custom-scenario JSON import** (host imports inline
+  JSON at room creation → 256KB cap + `validateScenario` + `analyzeAllFlows` gate → stored server-only on `room.customScenario`,
+  resolved everywhere via `getRoomScenario`, projected with identical per-player isolation). **Remaining (blocked, not
+  tractable this session):** LLM-assisted generation (needs a live model key — no key in this env) feeding the auto-solve
+  regression; a hand-authored scenario matrix (6–7 player, short, varied genres — creative content work); same-scenario
+  random-killer variants (unsound for a fixed authored case without regeneration — belongs with LLM-gen). — **most done; LLM-gen + content-authoring remain**
 - [x] **F3 · objectives scoring (KI-013 sibling)** ✅ PR #28 — machine-checkable scorecard computed at REVEAL
   **generically from the already-revealed tally/ballots** (killer→`escape`; non-killers→`not_accused` /
   `secret_hidden` [0 votes] / `vote_correct`) + a staged "本局结算·积分" leaderboard, so non-killers have a
@@ -176,10 +182,17 @@
   **investigation ceiling** (the last investigation phase in a flow exposes every clue round → quick stays solvable;
   standard byte-identical) + public `phaseSequence` in the projection so `PhaseIndicator` renders quick's 8 steps.
   Tests 279 → 307 → **327** (new `tests/flow.test.ts` + `tests/gameplay-investigation.test.ts`). — **M/L**
-- [ ] **F4-c · Flow pacing & scenario narration (deferred tail of F4)** — per-phase suggested durations + optional
-  auto-advance timers (enables async play + no host-offline stall), and scenario-driven GM narration override
-  (read `scenario.phases.gmScript`, fall back to `PHASE_NARRATIONS`). Auto-advance is a distinct mechanism (timer +
-  D2 takeover interplay) — own wave. Closes the last of KI-032/KI-057. — **M**
+- [x] **F4-c · Scenario narration + suggested durations** ✅ PR #36 — `Scenario.narrations` (keyed by GamePhase) +
+  `narrationForPhase` (scenario override ?? generic default); `PHASE_NARRATIONS` rewritten scenario-neutral, storm flavor
+  moved verbatim into `storm-mansion.json` (GM text byte-identical); `Scenario.phaseDurations` surfaced via
+  `toScenarioPublic` → `PhaseIndicator` "建议时长" chip. Closes the last of KI-032/KI-057. **File:** `phase-manager.ts`,
+  `storm-mansion.json`, `advance/route.ts`, `projection.ts`, `PhaseIndicator.tsx`. — **M**
+- [x] **F4-d · Opt-in deadline-based auto-advance** ✅ PR #38 — `Room.autoAdvance` (home toggle) + persisted
+  `Room.phaseDeadline` stamped per phase entry (`phaseDeadlineFor` pure helper); client shows an M:SS countdown and, once
+  the deadline passes, POSTs `advance {auto:true}` (any member; server re-validates `autoAdvance && now>=deadline` with
+  force semantics). No server timers → restart-tolerant. Manual host path byte-for-byte unchanged. Enables async / no
+  host-offline stall. **Files:** `advance/route.ts`, `start/route.ts`, `room-engine.ts`, `projection.ts`, `RoomClient.tsx`,
+  `page.tsx`, `types/game.ts`. — **M**
 - [x] **F5 · Human↔human private chat** ✅ PR #31 — a human-controlled target no longer 400s: the message is
   stored in the sender's isolated thread + a **signal-only** `room_state` event fires (no private content on the
   bus); the projection merges, per counterpart character, OUTGOING (`me:character`) with INCOMING
