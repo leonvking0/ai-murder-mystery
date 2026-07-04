@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { streamNPCResponse } from '@/lib/agents/npc-agent';
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { getAuthedPlayerId } from '@/lib/room/auth';
-import { getScenarioById } from '@/lib/scenarios/registry';
+import { getRoomScenario } from '@/lib/scenarios/registry';
 import { publish } from '@/lib/realtime/room-bus';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import type { ChatMessage } from '@/types/game';
@@ -42,7 +42,7 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Room not found' }, { status: 404 });
     }
 
-    const scenario = getScenarioById(room.scenarioId);
+    const scenario = getRoomScenario(room);
     if (!scenario) {
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }

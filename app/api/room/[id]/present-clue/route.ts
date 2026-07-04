@@ -1,7 +1,7 @@
 import { getPhaseConfig } from '@/lib/game-engine/phase-manager';
 import { presentClue } from '@/lib/game-engine/room-investigation';
 import { getAuthedPlayerId } from '@/lib/room/auth';
-import { getScenarioById } from '@/lib/scenarios/registry';
+import { getRoomScenario } from '@/lib/scenarios/registry';
 import { projectRoomForPlayer } from '@/lib/scenarios/projection';
 import { getRoom, updateRoom } from '@/lib/store/rooms';
 import { publish } from '@/lib/realtime/room-bus';
@@ -40,7 +40,7 @@ export async function POST(req: Request, context: RouteContext): Promise<Respons
       return Response.json({ error: 'Room not found' }, { status: 404 });
     }
 
-    const scenario = getScenarioById(room.scenarioId);
+    const scenario = getRoomScenario(room);
     if (!scenario) {
       return Response.json({ error: 'Scenario not found' }, { status: 404 });
     }

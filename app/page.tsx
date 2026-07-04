@@ -28,6 +28,7 @@ export default function HomePage() {
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [selectedFlowId, setSelectedFlowId] = useState<FlowId>('standard');
   const [autoAdvance, setAutoAdvance] = useState(false);
+  const [customScenarioText, setCustomScenarioText] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -53,15 +54,49 @@ export default function HomePage() {
   const createRoom = async () => {
     setCreating(true);
     setError(null);
+
+    // A non-empty custom scenario JSON takes precedence over the built-in picker. Parse it locally first
+    // so a syntax error is reported without a round-trip.
+    const trimmedCustom = customScenarioText.trim();
+    let customScenario: unknown;
+    if (trimmedCustom) {
+      try {
+        customScenario = JSON.parse(trimmedCustom);
+      } catch {
+        setError('JSON 解析失败');
+        setCreating(false);
+        return;
+      }
+    }
+
     try {
+      const body: Record<string, unknown> = { hostName, flowId: selectedFlowId, autoAdvance };
+      if (customScenario !== undefined) {
+        body.customScenario = customScenario;
+      } else {
+        body.scenarioId = selectedScenarioId ?? 'storm-mansion';
+      }
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selectedScenarioId ?? 'storm-mansion', hostName, flowId: selectedFlowId, autoAdvance }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error ?? '创建房间失败');
+        // Surface the server's reason plus, for an unsolvable custom scenario, a short summary of the
+        // structural issues so the author sees WHY it was rejected.
+        let message: string = data.error ?? '创建房间失败';
+        if (Array.isArray(data.issues) && data.issues.length > 0) {
+          const summary = data.issues
+            .slice(0, 5)
+            .map((issue: { message?: string }) => issue.message)
+            .filter(Boolean)
+            .join('；');
+          if (summary) {
+            message += `（${summary}）`;
+          }
+        }
+        throw new Error(message);
       }
       setPlayerId(data.roomId, data.playerId);
       router.push(`/room/${data.code}`);
@@ -180,6 +215,46 @@ export default function HomePage() {
                 </span>
               </span>
             </label>
+          </section>
+
+          <section>
+            <details className="rounded-xl border border-slate-700/80 bg-slate-900/50 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-amber-100">
+                导入自定义剧本
+                <span className="ml-2 text-xs font-normal text-slate-500">（可选 · 高级）</span>
+              </summary>
+              <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                粘贴剧本 JSON。导入后将覆盖上方所选剧本；创建时会校验格式与可解性，未通过会在下方提示原因。
+              </p>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) {
+                    return;
+                  }
+                  file.text().then(text => setCustomScenarioText(text)).catch(() => setError('文件读取失败'));
+                }}
+                className="mt-3 block w-full text-xs text-slate-400 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:text-amber-100 hover:file:bg-slate-700"
+              />
+              <textarea
+                value={customScenarioText}
+                onChange={e => setCustomScenarioText(e.target.value)}
+                placeholder='{"id": "my-scenario", "title": "...", ... }'
+                rows={6}
+                className="mt-3 w-full rounded-md border border-slate-600 bg-slate-900/80 p-2 font-mono text-xs text-slate-100 placeholder:text-slate-600"
+              />
+              {customScenarioText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setCustomScenarioText('')}
+                  className="mt-2 text-xs text-slate-400 underline hover:text-slate-200"
+                >
+                  清除并改用内置剧本
+                </button>
+              )}
+            </details>
           </section>
 
           <section>

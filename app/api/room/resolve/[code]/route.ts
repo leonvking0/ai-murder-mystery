@@ -1,4 +1,4 @@
-import { getScenarioById } from '@/lib/scenarios/registry';
+import { getRoomScenario } from '@/lib/scenarios/registry';
 import { getRoomByCode } from '@/lib/store/rooms';
 
 interface RouteContext {
@@ -48,7 +48,7 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
       return Response.json({ error: 'Room not found' }, { status: 404 });
     }
 
-    const scenario = getScenarioById(room.scenarioId);
+    const scenario = getRoomScenario(room);
 
     return Response.json({
       roomId: room.id,

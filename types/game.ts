@@ -244,6 +244,11 @@ export interface Room {
   id: string;
   code: string; // short shareable join code
   scenarioId: string;
+  // F2-tail (UGC): the full imported custom scenario, INCLUDING secrets (case.truth, isKiller,
+  // privateScript, clue.significance, …). SERVER-ONLY — resolved via getRoomScenario and projected
+  // per-player like any scenario; it MUST NEVER appear in a projection/SSE payload. Undefined for
+  // built-in rooms (they resolve through getScenarioById on scenarioId).
+  customScenario?: Scenario;
   status: RoomStatus;
   currentPhase: GamePhase;
   round: number;
